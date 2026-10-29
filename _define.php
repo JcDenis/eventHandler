@@ -22,7 +22,7 @@ $this->registerModule(
     'EventHandler',
     'Manage events on your blog',
     'Jean-Christian Denis, Nicolas Roudaire',
-    '2023.12.29',
+    '2026.10.29',
     [
         'requires'    => [['core', '2.39']],
         'permissions' => 'My',
