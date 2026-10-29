@@ -1,5 +1,5 @@
 # Language: Français
-# Module: eventHandler - 2023.12.12
+# Module: eventHandler - 2026.10.29
 # Date: 2023-12-20 19:13:52
 # Author: , nikrou77@gmail.com
 # Translated with translater 2023.11.04
@@ -7,7 +7,7 @@
 msgid ""
 msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
-"Project-Id-Version: eventHandler 2023.12.12\n"
+"Project-Id-Version: eventHandler 2026.10.29\n"
 "POT-Creation-Date: \n"
 "PO-Revision-Date: 2023-12-20T19:13:52+00:00\n"
 "Last-Translator: Nicolas\n"
@@ -810,3 +810,160 @@ msgid "Event #%d (%s) unbound from one related post"
 msgid_plural "Event #%d (%s) unbound from %d related posts"
 msgstr[0] "L'événement n°%d (%s) a bien été séparé de l'entrée liée"
 msgstr[1] "L'événement n°%d (%s) a bien été séparé des %d entrées liées"
+
+msgid "Events actions"
+msgstr "Actions sur les événements"
+
+msgid "No event selected"
+msgstr "Aucun événement sélectionné"
+
+msgid "No entry selected"
+msgstr "Aucun billet sélectionné"
+
+msgid "%d entry has been unbound from its events"
+msgid_plural "%d entries have been unbound from their events"
+msgstr[0] "%d billet a été détaché de ses événements"
+msgstr[1] "%d billets ont été détachés de leurs événements"
+
+msgid "%d related entry has been unbound"
+msgid_plural "%d related entries have been unbound"
+msgstr[0] "%d billet lié a été détaché"
+msgstr[1] "%d billets liés ont été détachés"
+
+msgid "No such entry ID"
+msgstr "Aucun billet ne correspond à cet identifiant"
+
+msgid "Entry has been bound to %d event"
+msgid_plural "Entry has been bound to %d events"
+msgstr[0] "Le billet a été lié à %d événement"
+msgstr[1] "Le billet a été lié à %d événements"
+
+msgid "%d entry selected"
+msgid_plural "%d entries selected"
+msgstr[0] "%d billet sélectionné"
+msgstr[1] "%d billets sélectionnés"
+
+msgid "One event"
+msgid_plural "%d events"
+msgstr[0] "Un événement"
+msgstr[1] "%d événements"
+
+msgid "events per page"
+msgstr "événements par page"
+
+msgid "Configuration has been successfully updated."
+msgstr "La configuration a été mise à jour."
+
+msgid "View the public list of events"
+msgstr "Voir la liste publique des événements"
+
+msgid "Enable plugin to configure it."
+msgstr "Activez le plugin pour le configurer."
+
+msgid "Contents"
+msgstr "Contenus"
+
+msgid "Default field for ordering events list:"
+msgstr "Champ de tri par défaut de la liste des événements :"
+
+msgid "Default order for events list:"
+msgstr "Ordre par défaut de la liste des événements :"
+
+msgid "No category"
+msgstr "Aucune catégorie"
+
+msgid "scheduled"
+msgstr "programmé"
+
+msgid "No event matches the filter"
+msgstr "Aucun événement ne correspond au filtre"
+
+msgid "List of %s events matching the filter."
+msgstr "Liste des %s événements correspondant au filtre."
+
+msgid "List of events (%s)"
+msgstr "Liste des événements (%s)"
+
+msgid "Select this event"
+msgstr "Sélectionner cet événement"
+
+msgid "No such post ID"
+msgstr "Aucun billet ne correspond à cet identifiant"
+
+msgid "Bind to entry"
+msgstr "Lier au billet"
+
+msgid "Events are disabled on this blog. Enable them from plugin configuration."
+msgstr "Les événements sont désactivés sur ce blog. Activez-les depuis la configuration du plugin."
+
+msgid "Select events to bind to entry \"%s\"."
+msgstr "Sélectionnez les événements à lier au billet « %s »."
+
+msgid "Bind selected events"
+msgstr "Lier les événements sélectionnés"
+
+msgid "This entry does not exist."
+msgstr "Ce billet n'existe pas."
+
+msgid "Next event"
+msgstr "Événement suivant"
+
+msgid "Previous event"
+msgstr "Événement précédent"
+
+msgid "Invalid date."
+msgstr "Date invalide."
+
+msgid "Event has been deleted."
+msgstr "L'événement a été supprimé."
+
+msgid "Entry has been changed into event."
+msgstr "Le billet a été transformé en événement."
+
+msgid "Don't forget to validate your HTML conversion by saving your event."
+msgstr "N'oubliez pas de valider la conversion HTML en enregistrant l'événement."
+
+msgid "Event language"
+msgstr "Langue de l'événement"
+
+msgid "Once saved, this entry will become an event and will no longer be listed with entries."
+msgstr "Une fois enregistré, ce billet deviendra un événement et ne sera plus listé avec les billets."
+
+msgid "%m %d %Y"
+msgstr "%d/%m/%Y"
+
+msgid "%m %Y"
+msgstr "%B %Y"
+
+msgid "List of events"
+msgstr "Liste des événements"
+
+msgid "%H:%M"
+msgstr "%H:%M"
+
+msgid "Show category"
+msgstr "Afficher la catégorie"
+
+msgid "List of events related to current entry"
+msgstr "Liste des événements liés au billet courant"
+
+msgid "List of entries related to current event"
+msgstr "Liste des billets liés à l'événement courant"
+
+msgid "List of events categories"
+msgstr "Liste des catégories d'événements"
+
+msgid "Map of events"
+msgstr "Carte des événements"
+
+msgid "Calendar of events"
+msgstr "Calendrier des événements"
+
+msgid "On %sd from %st to %et"
+msgstr "Le %sd de %st à %et"
+
+msgid "From %sd, %st to %ed, %et"
+msgstr "Du %sd, %st au %ed, %et"
+
+msgid "go to this category"
+msgstr "aller à cette catégorie"

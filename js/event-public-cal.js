@@ -75,7 +75,7 @@ if (window.jQuery) {
 
       fetch(
         service_url +
-          '&' +
+          (service_url.includes('?') ? '&' : '?') +
           new URLSearchParams({
             f: service_func,
             blogId: blog_uid,
@@ -88,9 +88,7 @@ if (window.jQuery) {
       )
         .then((data) => data.json())
         .then((response) => {
-          console.log(response);
           if (response.success) {
-            console.log('replace table');
             $(target).find('table').replaceWith(response.payload.calendar);
             $(target).eventHandlerCalendar();
             return false;

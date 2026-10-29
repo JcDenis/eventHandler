@@ -1,49 +1,71 @@
 <?php
-/*
- *  -- BEGIN LICENSE BLOCK ----------------------------------
- *
- *  This file is part of eventHandler, a plugin for Dotclear 2.
- *
- *  Copyright(c) 2014-2023 Nicolas Roudaire <nikrou77@gmail.com> https://www.nikrou.net
- *
- *  Copyright (c) 2009-2013 Jean-Christian Denis and contributors
- *  contact@jcdenis.fr https://chez.jcdenis.fr/
- *
- *  Licensed under the GPL version 2.0 license.
- *  A copy of this license is available in LICENSE file or at
- *  http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- *
- *  -- END LICENSE BLOCK ------------------------------------
- */
 
 declare(strict_types=1);
 
 namespace Dotclear\Plugin\eventHandler;
 
+use Dotclear\App;
 use Dotclear\Core\Backend\Notices;
 use Dotclear\Core\Backend\Page;
-use Dotclear\Core\Process;
-use Dotclear\Helper\Html\Html;
-use Dotclear\Plugin\eventHandler\Listing\ListingEvents;
-use Dotclear\App;
-use Dotclear\Core\Backend\UserPref;
 use Dotclear\Database\MetaRecord;
+use Dotclear\Helper\Html\Form\Div;
+use Dotclear\Helper\Html\Form\Form;
+use Dotclear\Helper\Html\Form\Hidden;
+use Dotclear\Helper\Html\Form\Label;
+use Dotclear\Helper\Html\Form\Link;
+use Dotclear\Helper\Html\Form\Note;
+use Dotclear\Helper\Html\Form\Para;
+use Dotclear\Helper\Html\Form\Select;
+use Dotclear\Helper\Html\Form\Submit;
+use Dotclear\Helper\Html\Form\Text;
+use Dotclear\Helper\Html\Html;
+use Dotclear\Helper\Process\TraitProcess;
 use Exception;
-use form;
 
-class Manage extends Process
+/**
+ * @brief       eventHandler backend events list.
+ * @ingroup     eventHandler
+ *
+ * @author      Jean-Christian Denis
+ * @author      Nicolas Roudaire
+ * @copyright   GPL-2.0 https://www.gnu.org/licenses/gpl-2.0.html
+ */
+class Manage
 {
+    use TraitProcess;
+
+    /**
+     * Entry to bind events to.
+     */
     private static ?MetaRecord $from_post = null;
-    private static ?int $from_id = null;
+
+    /**
+     * Events list filters.
+     */
+    private static ?FilterEvents $filter = null;
+
+    /**
+     * Events list.
+     */
+    private static ?ListingEvents $list = null;
+
+    /**
+     * Events list actions.
+     */
+    private static ?ActionsEvents $actions = null;
+
+    /**
+     * An action has been performed.
+     */
+    private static bool $action_done = false;
 
     public static function init(): bool
     {
-        if (My::checkContext(My::MANAGE)) {
-            if (isset($_REQUEST['part']) && $_REQUEST['part'] === 'event') {
-                ManageEvent::init();
-            }
+        self::status(My::checkContext(My::MANAGE));
 
-            self::status(true);
+        // call event manage page
+        if (($_REQUEST['part'] ?? 'events') === 'event') {
+            self::status(ManageEvent::init());
         }
 
         return self::status();
@@ -55,63 +77,66 @@ class Manage extends Process
             return false;
         }
 
-        if (isset($_REQUEST['part']) && $_REQUEST['part'] === 'event') {
+        // call event manage page
+        if (($_REQUEST['part'] ?? 'events') === 'event') {
             return ManageEvent::process();
         }
 
-        if (!empty($_REQUEST['from_id'])) {
-            try {
-                self::$from_id = (int) $_REQUEST['from_id'];
-                self::$from_post = App::blog()->getPosts(['post_id' => self::$from_id, 'post_type' => '']);
-                if (self::$from_post->isEmpty()) {
-                    self::$from_id = self::$from_post = null;
-                    throw new Exception(__('No such post ID'));
-                }
-            } catch (Exception $e) {
-                App::error()->add($e->getMessage());
+        // Entry to bind events to
+        $from_id = isset($_REQUEST['from_id']) && is_numeric($_REQUEST['from_id']) ? (int) $_REQUEST['from_id'] : 0;
+        if ($from_id > 0) {
+            $rs = App::blog()->getPosts(['post_id' => $from_id, 'post_type' => '', 'no_content' => true]);
+            if ($rs->isEmpty()) {
+                App::error()->add(__('No such post ID'));
+            } else {
+                self::$from_post = $rs;
             }
         }
 
-        App::backend()->eventhandler_events_filter = new FilterEvents();
-        App::backend()->eventhandler_events_filter_page = !empty($_GET['page']) ? max(1, (int) $_GET['page']) : 1;
-        App::backend()->eventhandler_events_filter_nb_per_page = UserPref::getUserFilters('posts', 'nb');
-
-        if (!empty($_GET['nb']) && (int) $_GET['nb'] > 0) {
-            App::backend()->eventhandler_events_filter_nb_per_page = (int) $_GET['nb'];
+        // Actions
+        $redir = ['part' => 'events'];
+        if (self::$from_post instanceof MetaRecord) {
+            $redir['from_id'] = (string) self::$from_post->intField('post_id');
         }
-
-        $params = App::backend()->eventhandler_events_filter->params();
-        $params['post_type'] = EventHandler::POST_TYPE;
-        $params['no_content'] = true;
-        $params['limit'] = [
-            ((App::backend()->eventhandler_events_filter_page - 1) * App::backend()->eventhandler_events_filter_nb_per_page),
-            App::backend()->eventhandler_events_filter_nb_per_page,
-        ];
-
-        App::backend()->eventhandler_events_list = null;
-
-        try {
-            $eventHandler = new EventHandler();
-            $events = $eventHandler->getEvents($params);
-            $counter = $eventHandler->getEvents($params, true);
-            App::backend()->eventhandler_events_list = new ListingEvents($events, $counter->f(0));
-            App::backend()->eventhandler_events_list->setEntriesNames('entries');
-            App::behavior()->callBehavior('adminEventHandlerEventsListCustom', [$events, $counter, App::backend()->eventhandler_events_list]);
-        } catch (Exception $e) {
-            App::error()->add($e->getMessage());
-        }
-
-        App::backend()->eventhandler_events_actions = new ActionsEvents(My::manageUrl(['part' => 'events']), ['part' => 'events']);
-        if (self::$from_id) {
-            App::backend()->eventhandler_events_actions->addAction(
-                [__('Entries') => [__('Bind related event') => ActionsEvents::BIND_EVENT_ACTION]],
-                ActionsEventsDefault::doBindUnBind(...)
+        self::$actions = new ActionsEvents(My::manageUrl([], '&'), $redir);
+        if (self::$from_post instanceof MetaRecord) {
+            self::$actions->addAction(
+                [__('Entries') => [__('Bind to entry') => ActionsEvents::BIND_EVENT_ACTION]],
+                ActionsEventsDefault::doBindUnbind(...)
             );
         }
+        if (self::$actions->process()) {
+            self::$action_done = true;
 
-        App::backend()->eventhandler_events_actions_rendered = null;
-        if (App::backend()->eventhandler_events_actions->process()) {
-            App::backend()->eventhandler_events_actions_rendered = true;
+            return true;
+        }
+
+        // Filters
+        self::$filter = new FilterEvents();
+        $params       = self::$filter->params();
+
+        $params['no_content'] = true;
+        if (self::$from_post instanceof MetaRecord) {
+            // Do not list events already bound to this entry
+            $bound = [];
+            $rs    = (new EventHandler())->getEventsByPost(['post_id' => self::$from_post->intField('post_id'), 'no_content' => true]);
+            while ($rs->fetch()) {
+                $bound[] = $rs->intField('post_id');
+            }
+            if ($bound !== []) {
+                $params['exclude_post_id'] = $bound;
+            }
+        }
+
+        // Events list
+        try {
+            $eventHandler = new EventHandler();
+            self::$list   = new ListingEvents(
+                $eventHandler->getEvents($params),
+                $eventHandler->getEvents($params, true)->intField(0)
+            );
+        } catch (Exception $e) {
+            App::error()->add($e->getMessage());
         }
 
         return true;
@@ -123,57 +148,116 @@ class Manage extends Process
             return;
         }
 
-        if (isset($_REQUEST['part']) && $_REQUEST['part'] === 'event') {
+        // call event manage page
+        if (($_REQUEST['part'] ?? 'events') === 'event') {
             ManageEvent::render();
 
             return;
         }
 
+        // Actions page
+        if (self::$action_done && self::$actions instanceof ActionsEvents) {
+            self::$actions->render();
+
+            return;
+        }
+
         Page::openModule(
-            __('Events'),
+            My::name(),
+            (self::$filter instanceof FilterEvents ? self::$filter->js(My::manageUrl(['part' => 'events'], '&')) : '') .
             Page::jsLoad('js/_posts_list.js') .
-            App::backend()->eventhandler_events_filter->js(My::manageUrl()) .
-            My::cssLoad('/css/style.css')
+            BackendBehaviors::adminCss()
         );
 
-        echo Page::breadcrumb([Html::escapeHTML(App::blog()->name()) => '',
-            '<a href="' . My::manageUrl(['part' => 'events']) . '">' . __('Events') . '</a>' => '',
-        ]);
+        echo
+        Page::breadcrumb([
+            Html::escapeHTML(App::blog()->name()) => '',
+            My::name()                            => '',
+        ]) .
+        Notices::getNotices();
 
-        echo Notices::getNotices();
+        if (!My::isActive()) {
+            echo (new Note())
+                ->class('warning')
+                ->text(__('Events are disabled on this blog. Enable them from plugin configuration.'))
+                ->render();
+        }
 
-        if (!App::error()->flag()) {
-            echo '<p class="top-add"><a class="button add" href="', My::manageUrl(['part' => 'event']), '">', __('New event'), '</a></p>';
+        echo (new Para())
+            ->class('top-add')
+            ->items([
+                (new Link())
+                    ->class(['button', 'add'])
+                    ->href(My::manageUrl(['part' => 'event']))
+                    ->text(__('New event')),
+            ])
+            ->render();
 
-            if (self::$from_id) {
-                echo '<p class="info">', sprintf(__('Attach events to "%s" post.'), self::$from_post->post_title), '</p>';
-            }
+        if (self::$from_post instanceof MetaRecord) {
+            echo (new Note())
+                ->class('info')
+                ->text(sprintf(
+                    __('Select events to bind to entry "%s".'),
+                    (new Link())
+                        ->href(App::postTypes()->getPostAdminURL(self::$from_post->strField('post_type'), self::$from_post->intField('post_id')))
+                        ->text(Html::escapeHTML(self::$from_post->strField('post_title')))
+                        ->render()
+                ))
+                ->render();
+        }
 
-            App::backend()->eventhandler_events_filter->display('admin.plugin.' . My::id());
+        if (self::$filter instanceof FilterEvents && self::$list instanceof ListingEvents && self::$actions instanceof ActionsEvents) {
+            self::$filter->display(
+                'admin.plugin.' . My::id(),
+                My::parsedHiddenFields(array_filter([
+                    'part'    => 'events',
+                    'from_id' => self::$from_post instanceof MetaRecord ? (string) self::$from_post->intField('post_id') : '',
+                ]))
+            );
 
-            $form_end = '';
-            if (self::$from_id) {
-                $form_end = '<input type="submit" value="' . __('Attach selected events') . '" />' .
-                form::hidden('action', ActionsEvents::BIND_EVENT_ACTION) .
-                form::hidden(['from_id'], self::$from_id);
+            $page = is_numeric(self::$filter->value('page')) ? (int) self::$filter->value('page') : 1;
+            $nb   = is_numeric(self::$filter->value('nb')) ? (int) self::$filter->value('nb') : 30;
+
+            if (self::$from_post instanceof MetaRecord) {
+                $buttons = [
+                    (new Hidden(['action'], ActionsEvents::BIND_EVENT_ACTION)),
+                    (new Hidden(['from_id'], (string) self::$from_post->intField('post_id'))),
+                    (new Submit('do-action', __('Bind selected events'))),
+                ];
             } else {
-                $form_end = '<label for="action" class="classic">' . __('Selected events action:') . '</label>' .
-                form::combo('action', App::backend()->eventhandler_events_actions->getCombo()) .
-                '<input id="do-action" type="submit" value="' . __('ok') . '" />';
+                $buttons = [
+                    (new Select('action'))
+                        ->items(self::$actions->getCombo())
+                        ->label(new Label(__('Selected events action:'), Label::OL_TF)),
+                    (new Submit('do-action', __('ok'))),
+                ];
             }
 
-            App::backend()->eventhandler_events_list->display(
-                App::backend()->eventhandler_events_filter_page,
-                App::backend()->eventhandler_events_filter_nb_per_page,
-                '<form action="' . My::manageUrl() . '" method="post" id="form-entries">' .
-                '%s' .
-                '<div class="two-cols">' .
-                '<p class="col checkboxes-helpers"></p>' .
-                '<p class="col right">' . $form_end .
-                App::backend()->url()->getHiddenFormFields('admin.plugin.' . My::id(), App::backend()->eventhandler_events_filter->values()) .
-                App::nonce()->getFormNonce() .
-                '</p></div>' .
-                '</form>'
+            self::$list->display(
+                $page,
+                $nb,
+                My::enclose((new Form('form-entries'))
+                    ->method('post')
+                    ->action(My::manageUrl(['part' => 'events']))
+                    ->fields([
+                        (new Text(null, My::ENCLOSE)),
+                        (new Div())
+                            ->class('two-cols')
+                            ->items([
+                                (new Para())
+                                    ->class(['col', 'checkboxes-helpers']),
+                                (new Para())
+                                    ->class(['col', 'right', 'form-buttons'])
+                                    ->items([
+                                        ... $buttons,
+                                        App::nonce()->formNonce(),
+                                        ... My::hiddenFields(array_filter(self::$filter->values(), is_string(...))),
+                                        (new Hidden(['part'], 'events')),
+                                    ]),
+                            ]),
+                    ])
+                    ->render()),
+                self::$filter->show()
             );
         }
 

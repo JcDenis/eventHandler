@@ -1,37 +1,35 @@
 <?php
-/*
- *  -- BEGIN LICENSE BLOCK ----------------------------------
+/**
+ * @file
+ * @brief       The plugin eventHandler definition
+ * @ingroup     eventHandler
  *
- *  This file is part of eventHandler, a plugin for Dotclear 2.
+ * @defgroup    eventHandler Plugin eventHandler.
  *
- *  Copyright(c) 2014-2023 Nicolas Roudaire <nikrou77@gmail.com> https://www.nikrou.net
+ * Manage events on your blog.
  *
- *  Copyright (c) 2009-2013 Jean-Christian Denis and contributors
- *  contact@jcdenis.fr https://chez.jcdenis.fr/
- *
- *  Licensed under the GPL version 2.0 license.
- *  A copy of this license is available in LICENSE file or at
- *  http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- *
- *  -- END LICENSE BLOCK ------------------------------------
+ * @author      Jean-Christian Denis (author)
+ * @author      Nicolas Roudaire
+ * @copyright   GPL-2.0 https://www.gnu.org/licenses/gpl-2.0.html
  */
+declare(strict_types=1);
 
-use Dotclear\App;
-use Dotclear\Core\Auth;
+if (!isset($this) || !is_object($this) || !method_exists($this, 'registerModule') || !isset($this->id) || !is_string($this->id)) {
+    return;
+}
 
 $this->registerModule(
-    "EventHandler", // Name
-    "Manage events on your blog", // Description
-    "JC Denis, Nicolas Roudaire", // Author
-    '2023.12.29', // Version
-    // Properties
+    'EventHandler',
+    'Manage events on your blog',
+    'Jean-Christian Denis, Nicolas Roudaire',
+    '2023.12.29',
     [
-        'permissions' => App::auth()->makePermissions([Auth::PERMISSION_CONTENT_ADMIN, Auth::PERMISSION_USAGE]),
-        'dc_min' => '2.28',
-        'requires' => [['core', '2.28']],
-        'type' => 'plugin',
-        'repository' => 'https://github.com/nikrou/eventHandler',
-        'support' => 'http://forum.dotclear.org/viewtopic.php?id=43296',
-        'details' => 'http://plugins.dotaddict.org/dc2/details/eventHandler',
+        'requires'    => [['core', '2.39']],
+        'permissions' => 'My',
+        'type'        => 'plugin',
+        'support'     => 'https://github.com/JcDenis/' . $this->id . '/issues',
+        'details'     => 'https://github.com/JcDenis/' . $this->id . '/',
+        'repository'  => 'https://raw.githubusercontent.com/JcDenis/' . $this->id . '/master/dcstore.xml',
+        'date'        => '2026-10-29T00:00:00+00:00',
     ]
 );

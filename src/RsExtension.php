@@ -1,273 +1,323 @@
 <?php
-/*
- *  -- BEGIN LICENSE BLOCK ----------------------------------
- *
- *  This file is part of eventHandler, a plugin for Dotclear 2.
- *
- *  Copyright(c) 2014-2023 Nicolas Roudaire <nikrou77@gmail.com> https://www.nikrou.net
- *
- *  Copyright (c) 2009-2013 Jean-Christian Denis and contributors
- *  contact@jcdenis.fr https://chez.jcdenis.fr/
- *
- *  Licensed under the GPL version 2.0 license.
- *  A copy of this license is available in LICENSE file or at
- *  http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- *
- *  -- END LICENSE BLOCK ------------------------------------
- */
 
 declare(strict_types=1);
 
 namespace Dotclear\Plugin\eventHandler;
 
+use Dotclear\App;
+use Dotclear\Core\Frontend\Ctx;
+use Dotclear\Database\MetaRecord;
 use Dotclear\Helper\Date;
 use Dotclear\Helper\Html\Html;
 use Dotclear\Schema\Extension\Post;
-use Dotclear\App;
-use Dotclear\Database\MetaRecord;
 
+/**
+ * @brief       eventHandler events record extension.
+ * @ingroup     eventHandler
+ *
+ * @author      Jean-Christian Denis
+ * @author      Nicolas Roudaire
+ * @copyright   GPL-2.0 https://www.gnu.org/licenses/gpl-2.0.html
+ */
 class RsExtension extends Post
 {
-    // Duration is on same real day
+    /**
+     * Check if event starts and ends on the same day.
+     */
     public static function isOnSameDay(MetaRecord $rs): bool
     {
-        return Date::dt2str('%Y%j', $rs->event_startdt) == Date::dt2str('%Y%j', $rs->event_enddt);
+        return Date::dt2str('%Y%j', $rs->strField('event_startdt')) === Date::dt2str('%Y%j', $rs->strField('event_enddt'));
     }
 
-    // Duration is less than 24 hours
+    /**
+     * Check if event duration is less than 24 hours.
+     */
     public static function isOnOneDay(MetaRecord $rs): bool
     {
-        return (strtotime((string) $rs->event_enddt) - strtotime((string) $rs->event_startdt)) < 86401;
+        return (self::getEventTS($rs, 'enddt') - self::getEventTS($rs, 'startdt')) < 86401;
     }
 
+    /**
+     * Get the date field name related to a type.
+     *
+     * @param   string  $type   The date type (startdt, enddt, upddt, creadt or empty for post_dt)
+     */
+    protected static function getDateField(string $type): string
+    {
+        return match ($type) {
+            'upddt'   => 'post_upddt',
+            'creadt'  => 'post_creadt',
+            'startdt' => 'event_startdt',
+            'enddt'   => 'event_enddt',
+            default   => 'post_dt',
+        };
+    }
+
+    /**
+     * Get event date timestamp.
+     *
+     * @param   MetaRecord  $rs     The record
+     * @param   string      $type   The date type (startdt, enddt, upddt, creadt or empty for post_dt)
+     */
     public static function getEventTS(MetaRecord $rs, string $type = ''): int
     {
-        if ($type == 'upddt') {
-            return strtotime((string) $rs->post_upddt);
-        } elseif ($type == 'creadt') {
-            return strtotime((string) $rs->post_creadt);
-        } elseif ($type == 'startdt') {
-            return strtotime((string) $rs->event_startdt);
-        } elseif ($type == 'enddt') {
-            return strtotime((string) $rs->event_enddt);
-        } else {
-            return strtotime((string) $rs->post_dt);
-        }
+        return (int) strtotime($rs->strField(self::getDateField($type)));
     }
 
+    /**
+     * Get event date as ISO8601.
+     *
+     * @param   MetaRecord  $rs     The record
+     * @param   string      $type   The date type (startdt, enddt, upddt, creadt or empty for post_dt)
+     */
     public static function getEventISO8601Date(MetaRecord $rs, string $type = ''): string
     {
+        $tz = $rs->strField('post_tz');
         if (in_array($type, ['upddt', 'creadt'])) {
-            return Date::iso8601($rs->getTS($type) + Date::getTimeOffset($rs->post_tz), $rs->post_tz);
-        } else {
-            return Date::iso8601($rs->getTS(), $rs->post_tz);
+            return Date::iso8601(self::getEventTS($rs, $type) + Date::getTimeOffset($tz), $tz);
         }
+
+        return Date::iso8601(self::getEventTS($rs, $type), $tz);
     }
 
+    /**
+     * Get event date as RFC822.
+     *
+     * @param   MetaRecord  $rs     The record
+     * @param   string      $type   The date type (startdt, enddt, upddt, creadt or empty for post_dt)
+     */
     public static function getEventRFC822Date(MetaRecord $rs, string $type = ''): string
     {
+        $tz = $rs->strField('post_tz');
         if (in_array($type, ['upddt', 'creadt'])) {
-            return Date::rfc822($rs->getTS($type) + Date::getTimeOffset($rs->post_tz), $rs->post_tz);
-        } else {
-            return Date::rfc822($rs->getTS($type), $rs->post_tz);
+            return Date::rfc822(self::getEventTS($rs, $type) + Date::getTimeOffset($tz), $tz);
         }
+
+        return Date::rfc822(self::getEventTS($rs, $type), $tz);
     }
 
-    public static function getEventDate(MetaRecord $rs, string $format, string $type = ''): string
+    /**
+     * Get formated event date.
+     *
+     * @param   MetaRecord  $rs         The record
+     * @param   string      $format     The date format (blog date format if empty)
+     * @param   string      $type       The date type (startdt, enddt, upddt, creadt or empty for post_dt)
+     */
+    public static function getEventDate(MetaRecord $rs, string $format = '', string $type = ''): string
     {
-        if (!$format) {
-            $format = App::blog()->settings()->system->date_format;
+        if ($format === '') {
+            $format = (string) App::blog()->settings()->get('system')->getStr('date_format', false);
         }
 
-        if ($type == 'upddt') {
-            return Date::dt2str($format, $rs->post_upddt, $rs->post_tz);
-        } elseif ($type == 'creadt') {
-            return Date::dt2str($format, $rs->post_creadt, $rs->post_tz);
-        } elseif ($type == 'startdt') {
-            return Date::dt2str($format, $rs->event_startdt);
-        } elseif ($type == 'enddt') {
-            return Date::dt2str($format, $rs->event_enddt);
-        } else {
-            return Date::dt2str($format, $rs->post_dt);
-        }
+        return self::formatEventDate($rs, $format, $type);
     }
 
-    public static function getEventTime(MetaRecord $rs, string $format, string $type = ''): string
+    /**
+     * Get formated event time.
+     *
+     * @param   MetaRecord  $rs         The record
+     * @param   string      $format     The time format (blog time format if empty)
+     * @param   string      $type       The date type (startdt, enddt, upddt, creadt or empty for post_dt)
+     */
+    public static function getEventTime(MetaRecord $rs, string $format = '', string $type = ''): string
     {
-        if (!$format) {
-            $format = App::blog()->settings()->system->time_format;
+        if ($format === '') {
+            $format = (string) App::blog()->settings()->get('system')->getStr('time_format', false);
         }
 
-        if ($type == 'upddt') {
-            return Date::dt2str($format, $rs->post_upddt, $rs->post_tz);
-        } elseif ($type == 'creadt') {
-            return Date::dt2str($format, $rs->post_creadt, $rs->post_tz);
-        } elseif ($type == 'startdt') {
-            return Date::dt2str($format, $rs->event_startdt);
-        } elseif ($type == 'enddt') {
-            return Date::dt2str($format, $rs->event_enddt);
-        } else {
-            return Date::dt2str($format, $rs->post_dt);
-        }
+        return self::formatEventDate($rs, $format, $type);
     }
 
+    /**
+     * Format an event date.
+     *
+     * Events dates are stored in blog timezone, posts dates in UTC.
+     *
+     * @param   MetaRecord  $rs         The record
+     * @param   string      $format     The date format
+     * @param   string      $type       The date type (startdt, enddt, upddt, creadt or empty for post_dt)
+     */
+    protected static function formatEventDate(MetaRecord $rs, string $format, string $type): string
+    {
+        $field = self::getDateField($type);
+
+        return in_array($type, ['upddt', 'creadt']) ?
+            Date::dt2str($format, $rs->strField($field), $rs->strField('post_tz')) :
+            Date::dt2str($format, $rs->strField($field));
+    }
+
+    /**
+     * Get event period (scheduled, ongoing or finished).
+     */
     public static function getPeriod(MetaRecord $rs): string
     {
         $now = date('Y-m-d H:i:s');
 
-        if ($rs->event_startdt > $now) {
+        if ($rs->strField('event_startdt') > $now) {
             return 'scheduled';
-        } elseif ($rs->event_enddt < $now) {
+        } elseif ($rs->strField('event_enddt') < $now) {
             return 'finished';
-        } else {
-            return 'ongoing';
         }
+
+        return 'ongoing';
     }
 
+    /**
+     * Check if current event is the first one of its day.
+     *
+     * @param   MetaRecord  $rs     The record
+     * @param   string      $type   The date type (startdt, enddt, upddt, creadt or empty for post_dt)
+     */
     public static function firstEventOfDay(MetaRecord $rs, string $type = ''): bool
     {
         if ($rs->isStart()) {
             return true;
         }
 
-        if ($type == 'upddt') {
-            $cdate = Date::dt2str('%Y%m%d', $rs->post_upddt, $rs->post_tz);
-        } elseif ($type == 'creadt') {
-            $cdate = Date::dt2str('%Y%m%d', $rs->post_creadt, $rs->post_tz);
-        } elseif ($type == 'startdt') {
-            $cdate = Date::dt2str('%Y%m%d', $rs->event_startdt);
-        } elseif ($type == 'enddt') {
-            $cdate = Date::dt2str('%Y%m%d', $rs->event_enddt);
-        } else {
-            $cdate = $rs->post_dt;
-        }
+        $cdate = self::formatEventDate($rs, '%Y%m%d', $type);
         $rs->movePrev();
-
-        if ($type == 'upddt') {
-            $ndate = Date::dt2str('%Y%m%d', $rs->post_upddt, $rs->post_tz);
-        } elseif ($type == 'creadt') {
-            $ndate = Date::dt2str('%Y%m%d', $rs->post_creadt, $rs->post_tz);
-        } elseif ($type == 'startdt') {
-            $ndate = Date::dt2str('%Y%m%d', $rs->event_startdt);
-        } elseif ($type == 'enddt') {
-            $ndate = Date::dt2str('%Y%m%d', $rs->event_enddt);
-        } else {
-            $ndate = $rs->post_dt;
-        }
+        $ndate = self::formatEventDate($rs, '%Y%m%d', $type);
         $rs->moveNext();
 
-        return $ndate != $cdate;
+        return $ndate !== $cdate;
     }
 
+    /**
+     * Check if current event is the last one of its day.
+     *
+     * @param   MetaRecord  $rs     The record
+     * @param   string      $type   The date type (startdt, enddt, upddt, creadt or empty for post_dt)
+     */
     public static function lastEventOfDay(MetaRecord $rs, string $type = ''): bool
     {
         if ($rs->isEnd()) {
             return true;
         }
 
-        if ($type == 'upddt') {
-            $cdate = Date::dt2str('%Y%m%d', $rs->post_upddt, $rs->post_tz);
-        } elseif ($type == 'creadt') {
-            $cdate = Date::dt2str('%Y%m%d', $rs->post_creadt, $rs->post_tz);
-        } elseif ($type == 'startdt') {
-            $cdate = Date::dt2str('%Y%m%d', $rs->event_startdt);
-        } elseif ($type == 'enddt') {
-            $cdate = Date::dt2str('%Y%m%d', $rs->event_enddt);
-        } else {
-            $cdate = $rs->post_dt;
-        }
+        $cdate = self::formatEventDate($rs, '%Y%m%d', $type);
         $rs->moveNext();
-
-        if ($type == 'upddt') {
-            $ndate = Date::dt2str('%Y%m%d', $rs->post_upddt, $rs->post_tz);
-        } elseif ($type == 'creadt') {
-            $ndate = Date::dt2str('%Y%m%d', $rs->post_creadt, $rs->post_tz);
-        } elseif ($type == 'startdt') {
-            $ndate = Date::dt2str('%Y%m%d', $rs->event_startdt);
-        } elseif ($type == 'enddt') {
-            $ndate = Date::dt2str('%Y%m%d', $rs->event_enddt);
-        } else {
-            $ndate = $rs->post_dt;
-        }
+        $ndate = self::formatEventDate($rs, '%Y%m%d', $type);
         $rs->movePrev();
 
-        return $ndate != $cdate;
+        return $ndate !== $cdate;
     }
 
-    // Not best place for next functions but work fine here!
+    /**
+     * Get event short description (text only).
+     *
+     * @param   MetaRecord  $rs         The record
+     * @param   bool        $encode     Encode HTML entities
+     */
+    protected static function getShortDescription(MetaRecord $rs, bool $encode = true): string
+    {
+        return Ctx::global_filters(
+            self::isExtended($rs) ? self::getExcerpt($rs) : self::getContent($rs),
+            [
+                0             => null,
+                'encode_xml'  => $encode ? 1 : 0,
+                'remove_html' => 1,
+                'cut_string'  => 250,
+            ]
+        );
+    }
+
+    /**
+     * Escape a value for iCalendar.
+     *
+     * @param   string  $value  The value
+     */
+    protected static function escapeIcal(string $value): string
+    {
+        return str_replace(["\\", ';', ',', "\r\n", "\n", "\r"], ["\\\\", '\;', '\,', '\n', '\n', '\n'], $value);
+    }
+
+    /**
+     * Get event as iCalendar VEVENT.
+     */
     public static function getIcalVEVENT(MetaRecord $rs): string
     {
-        $l = [];
-        $l[] = "BEGIN:VEVENT";
-        $l[] = "TRANSP:OPAQUE";
-        $l[] = "SEQUENCE:0";
-        $l[] = "PRIORITY:5";
-        $l[] = "CLASS:PUBLIC";
-        $l[] = "SUMMARY;CHARSET=UTF-8:" . $rs->post_title;
-        $l[] = "URL:" . $rs->getURL();
-        $l[] = "UID:" . $rs->post_id;
-        $l[] = "DTSTAMP;TZID=" . App::blog()->settings()->system->blog_timezone . ":" . Date::dt2str("%Y%m%dT%H%M%S", $rs->post_upddt, $rs->post_tz);
-        $l[] = "DTSTART;TZID=" . App::blog()->settings()->system->blog_timezone . ":" . Date::dt2str("%Y%m%dT%H%M%S", $rs->event_startdt);
-        $l[] = "DTEND;TZID=" . App::blog()->settings()->system->blog_timezone . ":" . Date::dt2str("%Y%m%dT%H%M%S", $rs->event_enddt);
-        $l[] = "DESCRIPTION;CHARSET=UTF-8:" . $rs->post_title . " - " .
-            ($rs->isExtended() ?
-            App::frontend()->context()->global_filter($rs->getExcerpt(), 1, 1, '250', 0, 0, '')
-            : App::frontend()->context()->global_filter($rs->getContent(), 1, 1, '250', 0, 0, '')) . " - " . $rs->getURL();
-        if ($rs->event_address) {
-            $l[] = "LOCATION;CHARSET=UTF-8:" . App::frontend()->context()->global_filter($rs->event_address, 1, 1, '250', 0, 0, '');
+        $tz  = (string) App::blog()->settings()->get('system')->getStr('blog_timezone', false);
+        $url = self::getURL($rs);
+
+        $lines = [
+            'BEGIN:VEVENT',
+            'TRANSP:OPAQUE',
+            'SEQUENCE:0',
+            'PRIORITY:5',
+            'CLASS:PUBLIC',
+            'SUMMARY;CHARSET=UTF-8:' . self::escapeIcal($rs->strField('post_title')),
+            'URL:' . $url,
+            'UID:' . App::blog()->uid() . '-' . $rs->intField('post_id'),
+            'DTSTAMP:' . Date::dt2str('%Y%m%dT%H%M%SZ', $rs->strField('post_upddt')),
+            'DTSTART;TZID=' . $tz . ':' . Date::dt2str('%Y%m%dT%H%M%S', $rs->strField('event_startdt')),
+            'DTEND;TZID=' . $tz . ':' . Date::dt2str('%Y%m%dT%H%M%S', $rs->strField('event_enddt')),
+            'DESCRIPTION;CHARSET=UTF-8:' . self::escapeIcal($rs->strField('post_title') . ' - ' . Html::decodeEntities(self::getShortDescription($rs, false)) . ' - ' . $url),
+        ];
+        if ($rs->strField('event_address') !== '') {
+            $lines[] = 'LOCATION;CHARSET=UTF-8:' . self::escapeIcal($rs->strField('event_address'));
         }
-        if ($rs->cat_id) {
-            $l[] = "CATEGORIES;CHARSET=UTF-8:" . $rs->cat_title;
+        if ($rs->strField('event_latitude') !== '' && $rs->strField('event_longitude') !== '') {
+            $lines[] = 'GEO:' . $rs->strField('event_latitude') . ';' . $rs->strField('event_longitude');
         }
-        $l[] = "END:VEVENT";
+        if ($rs->strField('cat_title') !== '') {
+            $lines[] = 'CATEGORIES;CHARSET=UTF-8:' . self::escapeIcal($rs->strField('cat_title'));
+        }
+        $lines[] = 'END:VEVENT';
 
         $res = '';
-        foreach ($l as $k => $line) {
-            $res .= implode("\r\n ", str_split(trim($line), 70)) . "\r\n";
+        foreach ($lines as $line) {
+            $res .= implode("\r\n ", mb_str_split(trim($line), 70)) . "\r\n";
         }
 
         return $res;
     }
 
+    /**
+     * Get event as hCalendar.
+     */
     public static function getHcalVEVENT(MetaRecord $rs): string
     {
-        $res =
-        '<div class="vevent">' . "\n" .
-        '<h2 class="summary">' . Html::escapeHTML($rs->post_title) . '</h2>' . "\n" .
-        '<ul>' . "\n" .
-        '<li>' . __('Start date:') . ' <abbr class="dtstart" title="' . $rs->getEventISO8601Date() . '">' . $rs->getEventDate('', 'startdt') . ', ' . $rs->getEventTime('', 'startdt') . '</abbr></li>' . "\n" .
-        '<li>' . __('End date:') . ' <abbr class="dtend" title="' . $rs->getEventISO8601Date() . '">' . $rs->getEventDate('', 'enddt') . ', ' . $rs->getEventTime('', 'enddt') . '</abbr></li>' . "\n";
-        if ($rs->event_address) {
-            $res .= '<li>' . __('Address:') . ' <abbr class="location">' . Html::escapeHTML($rs->event_address) . '</abbr></li>' . "\n";
-        }
-        if ($rs->event_latitude && $rs->event_longitude) {
-            $res .= '<li>' . __('Location:') . ' <abbr class="geo" title="' . $rs->event_latitude . ';' . $rs->event_longitude . '">' . __('latitude:') . ' ' . $rs->event_latitude . ', ' . __('longitude:') . ' ' . $rs->event_longitude . '</abbr></li>' . "\n";
-        }
-        if ($rs->cat_id) {
-            $res .= '<li>' . __('Category:') . ' <abbr class="categories">' . Html::escapeHTML($rs->cat_title) . '</abbr></li>' . "\n";
-        }
-        $res .=
-        '</ul>' . "\n" .
-        '<p class="description">' . ($rs->isExtended()
-            ? App::frontend()->context()->global_filter($rs->getExcerpt(), 1, 1, '250', 0, 0, '')
-            : App::frontend()->context()->global_filter($rs->getContent(), 1, 1, '250', 0, 0, '')) . '</p>' . "\n" .
-        '<p><a class="url" href="' . $rs->getURL() . '">' . __('Read more') . '</a> <abbr class="uid">' . App::blog()->id() . $rs->post_id . '</abbr></p>' . "\n" .
-        '</div>';
+        $res = '<div class="vevent">' . "\n" .
+            '<h2 class="summary">' . Html::escapeHTML($rs->strField('post_title')) . '</h2>' . "\n" .
+            '<ul>' . "\n" .
+            '<li>' . __('Start date:') . ' <abbr class="dtstart" title="' . self::getEventISO8601Date($rs, 'startdt') . '">' .
+                self::getEventDate($rs, '', 'startdt') . ', ' . self::getEventTime($rs, '', 'startdt') . '</abbr></li>' . "\n" .
+            '<li>' . __('End date:') . ' <abbr class="dtend" title="' . self::getEventISO8601Date($rs, 'enddt') . '">' .
+                self::getEventDate($rs, '', 'enddt') . ', ' . self::getEventTime($rs, '', 'enddt') . '</abbr></li>' . "\n";
 
-        return $res;
+        if ($rs->strField('event_address') !== '') {
+            $res .= '<li>' . __('Address:') . ' <abbr class="location">' . Html::escapeHTML($rs->strField('event_address')) . '</abbr></li>' . "\n";
+        }
+        if ($rs->strField('event_latitude') !== '' && $rs->strField('event_longitude') !== '') {
+            $res .= '<li>' . __('Location:') . ' <abbr class="geo" title="' . Html::escapeHTML($rs->strField('event_latitude') . ';' . $rs->strField('event_longitude')) . '">' .
+                __('latitude:') . ' ' . Html::escapeHTML($rs->strField('event_latitude')) . ', ' .
+                __('longitude:') . ' ' . Html::escapeHTML($rs->strField('event_longitude')) . '</abbr></li>' . "\n";
+        }
+        if ($rs->strField('cat_title') !== '') {
+            $res .= '<li>' . __('Category:') . ' <abbr class="categories">' . Html::escapeHTML($rs->strField('cat_title')) . '</abbr></li>' . "\n";
+        }
+
+        return $res .
+            '</ul>' . "\n" .
+            '<p class="description">' . self::getShortDescription($rs) . '</p>' . "\n" .
+            '<p><a class="url" href="' . self::getURL($rs) . '">' . __('Read more') . '</a> <abbr class="uid">' . App::blog()->id() . $rs->intField('post_id') . '</abbr></p>' . "\n" .
+            '</div>';
     }
 
+    /**
+     * Get event map marker.
+     */
     public static function getMapVEvent(MetaRecord $rs): string
     {
         return
             '<div style="display:none;" class="event-map-marker">' . "\n" .
-            '<p class="event-map-marker-latitude">' . $rs->event_latitude . '</p>' . "\n" .
-            '<p class="event-map-marker-longitude">' . $rs->event_longitude . '</p>' . "\n" .
-            '<p class="event-map-marker-title">' . Html::escapeHTML($rs->post_title) . '</p>' . "\n" .
-            '<p class="event-map-marker-startdt" title="' . Html::escapeHTML($rs->getEventDate("", "startdt") . ", " . $rs->getEventTime("", "startdt")) . '">' . $rs->event_startdt . '</p>' . "\n" .
-            '<p class="event-map-marker-enddt" title="' . Html::escapeHTML($rs->getEventDate("", "enddt") . ", " . $rs->getEventTime("", "enddt")) . '">' . $rs->event_enddt . '</p>' . "\n" .
-            '<p class="event-map-marker-address">' . Html::escapeHTML($rs->event_address) . '</p>' . "\n" .
-            '<p class="event-map-marker-link">' . $rs->getURL() . '</p>' . "\n" .
+            '<p class="event-map-marker-latitude">' . Html::escapeHTML($rs->strField('event_latitude')) . '</p>' . "\n" .
+            '<p class="event-map-marker-longitude">' . Html::escapeHTML($rs->strField('event_longitude')) . '</p>' . "\n" .
+            '<p class="event-map-marker-title">' . Html::escapeHTML($rs->strField('post_title')) . '</p>' . "\n" .
+            '<p class="event-map-marker-startdt" title="' . Html::escapeHTML(self::getEventDate($rs, '', 'startdt') . ', ' . self::getEventTime($rs, '', 'startdt')) . '">' . Html::escapeHTML($rs->strField('event_startdt')) . '</p>' . "\n" .
+            '<p class="event-map-marker-enddt" title="' . Html::escapeHTML(self::getEventDate($rs, '', 'enddt') . ', ' . self::getEventTime($rs, '', 'enddt')) . '">' . Html::escapeHTML($rs->strField('event_enddt')) . '</p>' . "\n" .
+            '<p class="event-map-marker-address">' . Html::escapeHTML($rs->strField('event_address')) . '</p>' . "\n" .
+            '<p class="event-map-marker-link">' . self::getURL($rs) . '</p>' . "\n" .
             '</div>';
     }
 }

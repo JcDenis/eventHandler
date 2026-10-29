@@ -1,52 +1,45 @@
 <?php
-/*
- *  -- BEGIN LICENSE BLOCK ----------------------------------
- *
- *  This file is part of eventHandler, a plugin for Dotclear 2.
- *
- *  Copyright(c) 2014-2023 Nicolas Roudaire <nikrou77@gmail.com> https://www.nikrou.net
- *
- *  Copyright (c) 2009-2013 Jean-Christian Denis and contributors
- *  contact@jcdenis.fr https://chez.jcdenis.fr/
- *
- *  Licensed under the GPL version 2.0 license.
- *  A copy of this license is available in LICENSE file or at
- *  http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- *
- *  -- END LICENSE BLOCK ------------------------------------
- */
 
 declare(strict_types=1);
 
 namespace Dotclear\Plugin\eventHandler;
 
 use Dotclear\App;
-use Dotclear\Helper\Date;
 use Exception;
 
+/**
+ * @brief       eventHandler REST methods.
+ * @ingroup     eventHandler
+ *
+ * @author      Jean-Christian Denis
+ * @author      Nicolas Roudaire
+ * @copyright   GPL-2.0 https://www.gnu.org/licenses/gpl-2.0.html
+ */
 class RestMethods
 {
     /**
-     * @param array<string, mixed> $get
-     * @param array<string, mixed> $post
+     * Unbind an event from an entry (backend).
+     *
+     * @param   array<string, mixed>    $get    The GET parameters
+     * @param   array<string, mixed>    $post   The POST parameters
      *
      * @return  array<string, mixed>
      */
     public static function unbindEventOfPost(array $get, array $post): array
     {
-        $post_id = $post['postId'] ?? null;
-        $event_id = $post['eventId'] ?? null;
+        $post_id  = isset($post['postId'])  && is_numeric($post['postId']) ? (int) $post['postId'] : 0;
+        $event_id = isset($post['eventId']) && is_numeric($post['eventId']) ? (int) $post['eventId'] : 0;
 
-        if (is_null($post_id)) {
+        if ($post_id <= 0) {
             throw new Exception(__('No such post ID'));
         }
 
-        if (is_null($event_id)) {
+        if ($event_id <= 0) {
             throw new Exception(__('No such event ID'));
         }
 
         try {
-            App::meta()->delPostMeta($post_id, 'eventhandler', $event_id);
+            (new EventHandler())->unbindEvent($post_id, $event_id);
         } catch (Exception) {
             throw new Exception(__('An error occured when trying de unbind event'));
         }
@@ -55,41 +48,27 @@ class RestMethods
     }
 
     /**
-     * @param array<string, mixed> $get
+     * Get calendar (frontend).
+     *
+     * @param   array<string, mixed>    $get    The GET parameters
      *
      * @return  array<string, mixed>
      */
     public static function calendar(array $get): array
     {
-        $current_ym = $get['curDate'] ?? '';
-        $direction = $get['reqDirection'] ?? 'prev';
-        $weekstart = isset($get['weekStart']) ? (bool) $get['weekStart'] : false;
-        $startonly = isset($get['startOnly']) ? (bool) $get['startOnly'] : true;
-
-        $table = '<p>' . __('An error occured') . '</p>';
-
-        if (!My::settings()->active) {
+        if (!My::isActive()) {
             throw new Exception(__('Event is disabled on this blog'));
         }
 
+        $current   = isset($get['curDate'])   && is_string($get['curDate']) ? $get['curDate'] : '';
+        $direction = isset($get['reqDirection']) && $get['reqDirection'] === 'next' ? 1 : -1;
+        $weekstart = !empty($get['weekStart']);
+        $startonly = !isset($get['startOnly']) || !empty($get['startOnly']);
+
         try {
-            $year = $cyear = (int) substr((string) $current_ym, 0, 4);
-            $month = $cmonth = (int) substr((string) $current_ym, 4, 2);
+            $ts = (int) mktime(0, 0, 0, (int) substr($current, 4, 2) + $direction, 1, (int) substr($current, 0, 4));
 
-            $prev = date('Y-m-01 00:00:00', mktime(0, 0, 0, $cmonth - 1, 1, $cyear));
-            $next = date('Y-m-01 00:00:00', mktime(0, 0, 0, $cmonth + 1, 1, $cyear));
-
-            if ($direction == 'prev') {
-                $year = Date::str('%Y', strtotime($prev));
-                $month = Date::str('%m', strtotime($prev));
-            } else {
-                $year = Date::str('%Y', strtotime($next));
-                $month = Date::str('%m', strtotime($next));
-            }
-
-            $calendar = Calendar::getArray($year, $month, $weekstart);
-
-            $table = Calendar::parseArray($calendar, $weekstart, $startonly, true);
+            $table = (new Calendar((int) date('Y', $ts), (int) date('m', $ts), $weekstart))->parse($startonly, true);
         } catch (Exception) {
             throw new Exception(__('Failed to get calendar'));
         }

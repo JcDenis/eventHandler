@@ -1,205 +1,183 @@
 <?php
-/*
- *  -- BEGIN LICENSE BLOCK ----------------------------------
- *
- *  This file is part of eventHandler, a plugin for Dotclear 2.
- *
- *  Copyright(c) 2014-2023 Nicolas Roudaire <nikrou77@gmail.com> https://www.nikrou.net
- *
- *  Copyright (c) 2009-2013 Jean-Christian Denis and contributors
- *  contact@jcdenis.fr https://chez.jcdenis.fr/
- *
- *  Licensed under the GPL version 2.0 license.
- *  A copy of this license is available in LICENSE file or at
- *  http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- *
- *  -- END LICENSE BLOCK ------------------------------------
- */
 
 declare(strict_types=1);
 
 namespace Dotclear\Plugin\eventHandler;
 
+use Dotclear\App;
 use Dotclear\Helper\Date;
 use Dotclear\Helper\Html\Html;
-use ArrayObject;
-use Dotclear\App;
 
+/**
+ * @brief       eventHandler calendar.
+ * @ingroup     eventHandler
+ *
+ * @author      Jean-Christian Denis
+ * @author      Nicolas Roudaire
+ * @copyright   GPL-2.0 https://www.gnu.org/licenses/gpl-2.0.html
+ */
 class Calendar
 {
-    // claim timestamp of sunday
+    /**
+     * Timestamp of a sunday.
+     *
+     * @var     int     SUNDAY_TS
+     */
     final public const SUNDAY_TS = 1_042_329_600;
 
     /**
-     * @return ArrayObject<string, mixed>
+     * Calendar year.
      */
-    public static function getArray(?string $year = null, ?string $month = null, bool $weekstart = false): ArrayObject
+    public readonly int $year;
+
+    /**
+     * Calendar month.
+     */
+    public readonly int $month;
+
+    /**
+     * Calendar caption.
+     *
+     * @var     array{prev_url: string, prev_txt: string, current: string, current_url: string, current_dt: string, next_url: string, next_txt: string}
+     */
+    public readonly array $caption;
+
+    /**
+     * Calendar head (days names).
+     *
+     * @var     array<int, string>
+     */
+    public readonly array $head;
+
+    /**
+     * Calendar rows (weeks of days, 0 for empty day).
+     *
+     * @var     array<int, array<int, int>>
+     */
+    public readonly array $rows;
+
+    /**
+     * Constructor.
+     *
+     * @param   int     $year       The year (current year if 0)
+     * @param   int     $month      The month (current month if 0)
+     * @param   bool    $weekstart  Week starts on monday
+     */
+    public function __construct(int $year = 0, int $month = 0, public readonly bool $weekstart = false)
     {
-        /** @var ArrayObject<string, mixed> $calendar */
-        $calendar = new ArrayObject();
+        $this->year  = $year  > 999 && $year < 10000 ? $year : (int) date('Y');
+        $this->month = $month > 0   && $month < 13 ? $month : (int) date('m');
 
-        // Parse date in
-        $weekstart = abs((int) $weekstart) + 0;
+        $ts      = (int) mktime(0, 0, 0, $this->month, 1, $this->year);
+        $prev_ts = (int) mktime(0, 0, 0, $this->month - 1, 1, $this->year);
+        $next_ts = (int) mktime(0, 0, 0, $this->month + 1, 1, $this->year);
 
-        if (null === $year || 4 != strlen($year)) {
-            $year = date('Y', time());
-        }
-        if (null === $month || 2 != strlen($month)) {
-            $month = date('m', time());
-        }
-        $day = date('d', time());
-
-        // ts
-        $dt = date('Y-m-01 00:00:00', mktime(0, 0, 0, (int) $month, 1, (int) $year));
-        $ts = strtotime($dt);
-        $prev_dt = date('Y-m-01 00:00:00', mktime(0, 0, 0, (int) $month - 1, 1, (int) $year));
-        $next_dt = date('Y-m-01 00:00:00', mktime(0, 0, 0, (int) $month + 1, 1, (int) $year));
-
-        $calendar['year'] = (int) $year;
-        $calendar['month'] = (int) $month;
-        $calendar['day'] = (int) $day;
-
-        // caption
-        $calendar['caption'] = [
-            'prev_url' => Date::dt2str('%Y/%m', $prev_dt),
-            'prev_txt' => Date::str('%B %Y', strtotime($prev_dt)),
-            'current' => Date::str('%B %Y', $ts),
-            'current_url' => Date::str('%Y/%m', $ts),
-            'current_dt' => Date::str('%Y%m', $ts),
-            'next_url' => Date::dt2str('%Y/%m', $next_dt),
-            'next_txt' => Date::str('%B %Y', strtotime($next_dt)),
+        $this->caption = [
+            'prev_url'    => date('Y/m', $prev_ts),
+            'prev_txt'    => Date::str('%B %Y', $prev_ts),
+            'current'     => Date::str('%B %Y', $ts),
+            'current_url' => date('Y/m', $ts),
+            'current_dt'  => date('Ym', $ts),
+            'next_url'    => date('Y/m', $next_ts),
+            'next_txt'    => Date::str('%B %Y', $next_ts),
         ];
 
         // days of week
+        $head     = [];
         $first_ts = self::SUNDAY_TS + ((int) $weekstart * 86400);
-        $last_ts = $first_ts + (6 * 86400);
-        $first = date('w', $ts);
-        $first = ($first == 0) ? 7 : $first;
-        $first = $first - $weekstart;
-        $limit = date('t', $ts);
-
-        $i = 0;
-        for ($j = $first_ts; $j <= $last_ts; $j = $j + 86400) {
-            $calendar['head'][$i]['day_txt'] = Date::str('%a', $j);
-            $i++;
+        for ($j = 0; $j < 7; $j++) {
+            $head[] = Date::str('%a', $first_ts + ($j * 86400));
         }
+        $this->head = $head;
 
-        $d = 1;
-        $i = $row = $field = 0;
-        $dstart = false;
-
-        while ($i < 42) {
-            if ($i % 7 == 0) {
-                $row++;
-                $field = 0;
-            }
-            if ($i == $first) {
-                $dstart = true;
-            }
-            if ($dstart && !checkdate((int) $month, $d, (int) $year)) {
-                $dstart = false;
-            }
-            $calendar['rows'][$row][$field] = $dstart ? $d : ' ';
-            $field++;
-
-            if (($i + 1) % 7 == 0 && $d >= $limit) {
-                $i = 42;
-            }
-
-            if ($dstart) {
-                $d++;
-            }
-
-            $i++;
+        // days of month
+        $first = (int) date('w', $ts) - (int) $weekstart;
+        if ($first < 0) {
+            $first += 7;
         }
+        $limit = (int) date('t', $ts);
 
-        return $calendar;
+        $rows = [];
+        $day  = 1;
+        for ($i = 0; $i < 42; $i++) {
+            $row = intdiv($i, 7);
+            if ($i >= $first && $day <= $limit) {
+                $rows[$row][] = $day;
+                $day++;
+            } else {
+                $rows[$row][] = 0;
+            }
+            // stop at end of a week if month is complete
+            if (($i + 1) % 7 === 0 && $day > $limit) {
+                break;
+            }
+        }
+        $this->rows = $rows;
     }
 
     /**
-     * @param ArrayObject<string, mixed> $calendar
+     * Get HTML calendar.
+     *
+     * @param   bool    $startonly  Only show events start dates
+     * @param   bool    $rest       Only table content (for rest service)
      */
-    public static function parseArray(ArrayObject $calendar, bool $weekstart, bool $startonly, bool $rest = false): string
+    public function parse(bool $startonly, bool $rest = false): string
     {
         $eventHandler = new EventHandler();
 
-        $class = $weekstart ? ' weekstart' : '';
-        $class .= $startonly ? ' startonly' : '';
+        $class = ($this->weekstart ? ' weekstart' : '') . ($startonly ? ' startonly' : '');
+        $base  = App::blog()->url() . App::url()->getBase('eventhandler_list') . '/' . ($startonly ? 'of' : 'on') . '/';
 
-        $res = '';
-        if (!$rest) {
-            $res .= "\n<div class=\"calendar-array" . $class . "\">";
-        }
-        $res .= "<table summary=\"" . __('Calendar') . "\">\n";
+        $res = $rest ? '' : "\n" . '<div class="calendar-array' . $class . '">';
+        $res .= '<table>' . "\n" .
+            ' <caption title="' . $this->caption['current_dt'] . '">' . "\n" .
+            '  <a class="prev" href="' . $base . $this->caption['prev_url'] . '" title="' . Html::escapeHTML($this->caption['prev_txt']) . '">&#171;</a> ' . "\n" .
+            '  <a class="current" href="' . $base . $this->caption['current_url'] . '" title="' . __('Detail') . '">' . Html::escapeHTML($this->caption['current']) . '</a>' . "\n" .
+            '  <a class="next" href="' . $base . $this->caption['next_url'] . '" title="' . Html::escapeHTML($this->caption['next_txt']) . '">&#187;</a> ' . "\n" .
+            ' </caption>' . "\n" .
+            ' <thead>' . "\n" . '  <tr>' . "\n";
 
-        $base = '';
-        if ($calendar['caption']) {
-            $base = App::blog()->url() . App::url()->getBase('eventhandler_list') . '/' . ($startonly ? 'of' : 'on') . '/';
-
-            $res .= " <caption title=\"" . $calendar['caption']['current_dt'] . "\">\n";
-            if (!empty($calendar['caption']['prev_url'])) {
-                $res .= "  <a class=\"prev\" href=\"" . $base . $calendar['caption']['prev_url'] . "\" title=\"" . $calendar['caption']['prev_txt'] . "\">&#171;</a> \n";
-            }
-
-            $res .= "  <a class=\"current\" href=\"" . $base . $calendar['caption']['current_url'] . "\" title=\"" . __('Detail') . "\">" . $calendar['caption']['current'] . "</a>\n";
-
-            if (!empty($calendar['caption']['next_url'])) {
-                $res .= "  <a class=\"next\" href=\"" . $base . $calendar['caption']['next_url'] . "\" title=\"" . $calendar['caption']['next_txt'] . "\">&#187;</a> \n";
-            }
-
-            $res .= " </caption>\n";
+        foreach ($this->head as $day_txt) {
+            $res .= '   <th>' . Html::escapeHTML($day_txt) . '</th>' . "\n";
         }
 
-        if ($calendar['head']) {
-            $res .= " <thead>\n  <tr>\n";
-            foreach ($calendar['head'] as $d) {
-                $res .= "   <th>" . $d['day_txt'] . "</th>\n";
-            }
-            $res .= "  </tr>\n </thead>\n";
-        }
+        $res .= '  </tr>' . "\n" . ' </thead>' . "\n" . ' <tbody>' . "\n";
 
-        if ($calendar['rows']) {
-            $res .= " <tbody>\n";
-
-            foreach ($calendar['rows'] as $days) {
-                $res .= "  <tr>\n";
-                foreach ($days as $day) {
-                    if (' ' != $day) {
-                        $params = [];
-                        if (!$startonly) {
-                            $params['event_period'] = 'ongoing';
-                            $params['event_startdt'] = date('Y-m-d H:i:s', mktime(0, 0, 0, $calendar['month'], (int) $day + 1, $calendar['year']));
-                            $params['event_enddt'] = date('Y-m-d H:i:s', mktime(0, 0, 0, $calendar['month'], (int) $day, $calendar['year']));
-                        } else {
-                            $params['event_start_year'] = $calendar['year'];
-                            $params['event_start_month'] = $calendar['month'];
-                            $params['event_start_day'] = $day;
-                        }
-
-                        $ev_rs = $eventHandler->getEvents($params);
-                        $count = $ev_rs->count();
-
-                        if ($count == 1) {
-                            $day =
-                            '<a href="' . $ev_rs->getURL() . '" title="' .
-                            Html::escapeHTML($ev_rs->post_title) . '">' . $day . '</a>';
-                        } elseif ($count > 1) {
-                            $day =
-                            '<a href="' . $base . $calendar['year'] . '/' . $calendar['month'] . '/' . $day .
-                            '" title="' . sprintf(__('%s events'), $count) . '">' . $day . '</a>';
-                        }
+        $hidden = My::hiddenCategoriesSql();
+        foreach ($this->rows as $days) {
+            $res .= '  <tr>' . "\n";
+            foreach ($days as $day) {
+                $content = ' ';
+                $classes = '';
+                if ($day !== 0) {
+                    $content = (string) $day;
+                    $params  = ['no_content' => true, 'sql' => $hidden];
+                    if ($startonly) {
+                        $params['event_start_year']  = $this->year;
+                        $params['event_start_month'] = $this->month;
+                        $params['event_start_day']   = $day;
+                    } else {
+                        $params['event_period']  = 'ongoing';
+                        $params['event_startdt'] = date('Y-m-d H:i:s', (int) mktime(0, 0, 0, $this->month, $day + 1, $this->year));
+                        $params['event_enddt']   = date('Y-m-d H:i:s', (int) mktime(0, 0, 0, $this->month, $day, $this->year));
                     }
-                    $res .= "   <td" . (2 < strlen((string) $day) ? ' class="eventsday"' : '') . ">" . $day . "</td>\n";
+
+                    $rs    = $eventHandler->getEvents($params);
+                    $count = $rs->count();
+                    if ($count === 1) {
+                        $rs->fetch();
+                        $content = '<a href="' . RsExtension::getURL($rs) . '" title="' . Html::escapeHTML($rs->strField('post_title')) . '">' . $day . '</a>';
+                        $classes = ' class="eventsday"';
+                    } elseif ($count > 1) {
+                        $content = '<a href="' . $base . $this->year . '/' . sprintf('%02d', $this->month) . '/' . sprintf('%02d', $day) . '" title="' . sprintf(__('%s events'), $count) . '">' . $day . '</a>';
+                        $classes = ' class="eventsday"';
+                    }
                 }
-                $res .= "  </tr>\n";
+                $res .= '   <td' . $classes . '>' . $content . '</td>' . "\n";
             }
-            $res .= " </tbody>\n";
-        }
-        $res .= "</table>";
-        if (!$rest) {
-            $res .= "</div>\n";
+            $res .= '  </tr>' . "\n";
         }
 
-        return $res;
+        return $res . ' </tbody>' . "\n" . '</table>' . ($rest ? '' : '</div>' . "\n");
     }
 }

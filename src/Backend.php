@@ -1,31 +1,26 @@
 <?php
-/*
- *  -- BEGIN LICENSE BLOCK ----------------------------------
- *
- *  This file is part of eventHandler, a plugin for Dotclear 2.
- *
- *  Copyright(c) 2014-2023 Nicolas Roudaire <nikrou77@gmail.com> https://www.nikrou.net
- *
- *  Copyright (c) 2009-2013 Jean-Christian Denis and contributors
- *  contact@jcdenis.fr https://chez.jcdenis.fr/
- *
- *  Licensed under the GPL version 2.0 license.
- *  A copy of this license is available in LICENSE file or at
- *  http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- *
- *  -- END LICENSE BLOCK ------------------------------------
- */
 
 declare(strict_types=1);
 
 namespace Dotclear\Plugin\eventHandler;
 
-use Dotclear\Core\Backend\Menus;
-use Dotclear\Core\Process;
 use Dotclear\App;
+use Dotclear\Core\Backend\Menus;
+use Dotclear\Core\PostType;
+use Dotclear\Helper\Process\TraitProcess;
 
-class Backend extends Process
+/**
+ * @brief       eventHandler backend class.
+ * @ingroup     eventHandler
+ *
+ * @author      Jean-Christian Denis
+ * @author      Nicolas Roudaire
+ * @copyright   GPL-2.0 https://www.gnu.org/licenses/gpl-2.0.html
+ */
+class Backend
 {
+    use TraitProcess;
+
     public static function init(): bool
     {
         return self::status(My::checkContext(My::BACKEND));
@@ -37,28 +32,38 @@ class Backend extends Process
             return false;
         }
 
+        // Events post type with backend URLs
+        $icons = My::icons();
+        App::postTypes()->set(new PostType(
+            My::POST_TYPE,
+            urldecode(My::manageUrl(['part' => 'event', 'id' => '%d'], '&')),
+            App::url()->getURLFor('eventhandler_single', '%s'),
+            'Events',
+            urldecode(My::manageUrl(['part' => 'events'], '&')),
+            $icons[0] ?? '',
+            $icons[1] ?? $icons[0] ?? ''
+        ));
+
+        // backend sidebar menu icon
         My::addBackendMenuItem(Menus::MENU_BLOG);
 
-        App::behavior()->addBehavior('initWidgets', Widgets::events(...));
-        App::behavior()->addBehavior('initWidgets', Widgets::eventsOfPost(...));
-        App::behavior()->addBehavior('initWidgets', Widgets::postsOfEvent(...));
-        App::behavior()->addBehavior('initWidgets', Widgets::categories(...));
-        App::behavior()->addBehavior('initWidgets', Widgets::calendar(...));
-        App::behavior()->addBehavior('initWidgets', Widgets::map(...));
+        App::behavior()->addBehaviors([
+            'initWidgets'               => Widgets::init(...),
+            'adminDashboardFavoritesV2' => BackendBehaviors::adminDashboardFavoritesV2(...),
+            'adminColumnsListsV2'       => BackendBehaviors::adminColumnsListsV2(...),
+            'adminFiltersListsV2'       => BackendBehaviors::adminFiltersListsV2(...),
+            'adminBeforePostDelete'     => BackendBehaviors::adminBeforePostDelete(...),
+        ]);
 
-        // Admin Dashboard
-        App::behavior()->addBehavior('adminDashboardFavoritesV2', AdminBehaviors::adminDashboardFavs(...));
-        App::behavior()->addBehavior('pluginsToolsHeadersV2', AdminBehaviors::pluginsToolsHeadersV2(...));
-
-        // Admin behaviors
-        if (My::settings()->active) {
-            App::behavior()->addBehavior('adminPageHTTPHeaderCSP', AdminBehaviors::adminPageHTTPHeaderCSP(...));
-            App::behavior()->addBehavior('adminPostHeaders', AdminBehaviors::adminPostHeaders(...));
-            App::behavior()->addBehavior('adminPostsActions', AdminBehaviors::adminPostsActions(...));
-            App::behavior()->addBehavior('adminPostFormItems', AdminBehaviors::adminPostFormItems(...));
-            App::behavior()->addBehavior('adminAfterPostCreate', AdminBehaviors::adminAfterPostSave(...));
-            App::behavior()->addBehavior('adminAfterPostUpdate', AdminBehaviors::adminAfterPostSave(...));
-            App::behavior()->addBehavior('adminBeforePostDelete', AdminBehaviors::adminBeforePostDelete(...));
+        if (My::isActive()) {
+            App::behavior()->addBehaviors([
+                'adminPageHTTPHeaderCSP' => BackendBehaviors::adminPageHTTPHeaderCSP(...),
+                'adminPostHeaders'       => BackendBehaviors::adminPostHeaders(...),
+                'adminPostsActions'      => BackendBehaviors::adminPostsActions(...),
+                'adminPostFormItems'     => BackendBehaviors::adminPostFormItems(...),
+                'adminAfterPostCreate'   => BackendBehaviors::adminAfterPostSave(...),
+                'adminAfterPostUpdate'   => BackendBehaviors::adminAfterPostSave(...),
+            ]);
         }
 
         return true;

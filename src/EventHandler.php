@@ -1,74 +1,90 @@
 <?php
-/*
- *  -- BEGIN LICENSE BLOCK ----------------------------------
- *
- *  This file is part of eventHandler, a plugin for Dotclear 2.
- *
- *  Copyright(c) 2014-2023 Nicolas Roudaire <nikrou77@gmail.com> https://www.nikrou.net
- *
- *  Copyright (c) 2009-2013 Jean-Christian Denis and contributors
- *  contact@jcdenis.fr https://chez.jcdenis.fr/
- *
- *  Licensed under the GPL version 2.0 license.
- *  A copy of this license is available in LICENSE file or at
- *  http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- *
- *  -- END LICENSE BLOCK ------------------------------------
- */
 
 declare(strict_types=1);
 
 namespace Dotclear\Plugin\eventHandler;
 
+use ArrayObject;
 use Dotclear\App;
-use Dotclear\Core\Auth;
 use Dotclear\Database\Cursor;
 use Dotclear\Database\MetaRecord;
+use Dotclear\Database\Statement\DeleteStatement;
 use Dotclear\Database\Statement\JoinStatement;
 use Dotclear\Database\Statement\SelectStatement;
+use Dotclear\Helper\Html\Html;
 use Exception;
 
+/**
+ * @brief       eventHandler main class.
+ * @ingroup     eventHandler
+ *
+ * Events are entries of type "eventhandler" with extra fields
+ * in eventhandler table. Relations between entries and events
+ * are stored as entries metadata.
+ *
+ * @author      Jean-Christian Denis
+ * @author      Nicolas Roudaire
+ * @copyright   GPL-2.0 https://www.gnu.org/licenses/gpl-2.0.html
+ */
 class EventHandler
 {
-    final public const POST_TYPE = 'eventhandler';
+    /**
+     * Events post type.
+     *
+     * @deprecated  since 2026.10.29, use My::POST_TYPE instead
+     */
+    final public const POST_TYPE = My::POST_TYPE;
 
-    protected string $type;
+    /**
+     * Event table name (with prefix).
+     */
     protected string $table;
 
-    public function __construct(string $type = self::POST_TYPE)
-    {
-        $this->type = (string) $type;
-        $this->table = App::con()->prefix() . 'eventhandler';
-    }
-
     /**
-     * @param array<string, mixed> $params
+     * Constructor.
      *
-     * @return array<string, mixed>
+     * @param   string  $type   The events post type
      */
-    public static function cleanedParams($params): array
-    {
-        if (!isset($params['columns'])) {
-            $params['columns'] = [];
-        }
-
-        if (!isset($params['from'])) {
-            $params['from'] = '';
-        }
-
-        if (!isset($params['sql'])) {
-            $params['sql'] = '';
-        }
-
-        return $params;
+    public function __construct(
+        protected string $type = My::POST_TYPE
+    ) {
+        $this->table = App::db()->con()->prefix() . My::TABLE_NAME;
     }
 
     /**
-     * @param array<string, mixed> $params
+     * Get events table name.
      */
-    public function getEvents(array $params = [], bool $count_only = false): MetaRecord
+    public function table(): string
     {
-        $params = self::cleanedParams($params);
+        return $this->table;
+    }
+
+    /**
+     * Open an event cursor.
+     */
+    public function openEventCursor(): Cursor
+    {
+        return App::db()->con()->openCursor($this->table);
+    }
+
+    /**
+     * Get events.
+     *
+     * Extra parameters:
+     * - event_id: alias of post_id
+     * - event_period: all, ongoing, outgoing, scheduled, started, notfinished, finished
+     * - event_startdt, event_enddt: dates used by event_period (default: now)
+     * - event_start_year, event_start_month, event_start_day: filter on event start date
+     * - event_end_year, event_end_month, event_end_day: filter on event end date
+     * - event_address: filter on event address
+     *
+     * @param   array<string, mixed>|ArrayObject<string, mixed>     $params         The parameters
+     * @param   bool                                                $count_only     Only count events
+     * @param   null|SelectStatement                                $ext_sql        Extra SQL statement
+     */
+    public function getEvents(array|ArrayObject $params = [], bool $count_only = false, ?SelectStatement $ext_sql = null): MetaRecord
+    {
+        $params = $params instanceof ArrayObject ? $params->getArrayCopy() : $params;
 
         if (isset($params['event_id'])) {
             $params['post_id'] = $params['event_id'];
@@ -84,369 +100,489 @@ class EventHandler
             $params['post_type'] = $this->type;
         }
 
-        if (!isset($params['columns'])) {
-            $params['columns'] = [];
+        $columns = [];
+        if (isset($params['columns'])) {
+            $columns = is_array($params['columns']) ? $params['columns'] : [$params['columns']];
         }
+        $params['columns'] = array_merge($columns, [
+            'event_startdt',
+            'event_enddt',
+            'event_address',
+            'event_latitude',
+            'event_longitude',
+            'event_zoom',
+        ]);
 
-        $col = (array) $params['columns'];
-        $col[] = 'event_startdt';
-        $col[] = 'event_enddt';
-        $col[] = 'event_address';
-        $col[] = 'event_latitude';
-        $col[] = 'event_longitude';
-        $col[] = 'event_zoom';
-        $params['columns'] = $col;
+        $str = fn (string $key): string => isset($params[$key]) && is_scalar($params[$key]) ? (string) $params[$key] : '';
+        $int = fn (string $key): int => isset($params[$key]) && is_numeric($params[$key]) ? (int) $params[$key] : 0;
 
-        $sql = new SelectStatement();
+        $sql = $ext_sql instanceof SelectStatement ? clone $ext_sql : new SelectStatement();
         $sql->join(
             (new JoinStatement())
-                   ->type('INNER')
-                   ->from($this->table . ' EH')
-                   ->on('EH.post_id = P.post_id')
-                   ->statement()
+                ->inner()
+                ->from($sql->as($this->table, 'EH'))
+                ->on('EH.post_id = P.post_id')
+                ->statement()
         );
 
-        if (!empty($params['event_period']) && $params['event_period'] != 'all') {
-            $op = match ($params['event_period']) {
-                'ongoing' => ['<', '>', 'AND'],
+        $where = '';
+
+        $period = $str('event_period');
+        if ($period !== '' && $period !== 'all') {
+            $op = match ($period) {
+                'ongoing'  => ['<', '>', 'AND'],
                 'outgoing' => ['>', '<', 'OR'],
-                'notstarted', 'scheduled' => ['>', '!'],
-                'started' => ['<', '!'],
-                'notfinished' => ['!', '>'],
-                'finished' => ['!', '<'],
-                default => ['=', '=', 'AND'],
+                'notstarted', 'scheduled' => ['>', '!', ''],
+                'started'     => ['<', '!', ''],
+                'notfinished' => ['!', '>', ''],
+                'finished'    => ['!', '<', ''],
+                default       => ['=', '=', 'AND'],
             };
-            $now = date('Y-m-d H:i:s');
+            $now   = date('Y-m-d H:i:s');
+            $start = $str('event_startdt') !== '' ? $str('event_startdt') : $now;
+            $end   = $str('event_enddt')   !== '' ? $str('event_enddt') : $now;
 
-            // sqlite does not understand the TIMESTAMP function but understands the 'Y-m-d H:i:s' format just fine
-            $timestamp = App::con()->driver() == 'sqlite' ? "" : " TIMESTAMP";
-
-            $params['sql'] .= $op[0] != '!' && $op[1] != '!' ? 'AND (' : 'AND ';
-
-            if (!empty($params['event_startdt']) && $op[0] != '!') {
-                $params['sql'] .= "EH.event_startdt " . $op[0] . $timestamp . " '" . App::con()->escape($params['event_startdt']) . "'";
-            } elseif (empty($params['event_startdt']) && $op[0] != '!') {
-                $params['sql'] .= "EH.event_startdt " . $op[0] . $timestamp . " '" . $now . "'";
+            $parts = [];
+            if ($op[0] !== '!') {
+                $parts[] = 'EH.event_startdt ' . $op[0] . ' ' . $sql->quote($start);
             }
-
-            $params['sql'] .= $op[0] != '!' && $op[1] != '!' ? ' ' . $op[2] . ' ' : '';
-
-            if (!empty($params['event_enddt']) && $op[1] != '!') {
-                $params['sql'] .= "EH.event_enddt " . $op[1] . $timestamp . " '" . App::con()->escape($params['event_enddt']) . "'";
-            } elseif (empty($params['event_enddt']) && $op[1] != '!') {
-                $params['sql'] .= "EH.event_enddt " . $op[1] . $timestamp . " '" . $now . "'";
+            if ($op[1] !== '!') {
+                $parts[] = 'EH.event_enddt ' . $op[1] . ' ' . $sql->quote($end);
             }
-
-            $params['sql'] .= $op[0] != '!' && $op[1] != '!' ? ') ' : ' ';
+            $where .= 'AND (' . implode(' ' . ($op[2] !== '' ? $op[2] : 'AND') . ' ', $parts) . ') ';
         }
 
-        if (!empty($params['event_start_year'])) {
-            $params['sql'] .= 'AND ' . App::con()->dateFormat('EH.event_startdt', '%Y') . ' = ' .
-            "'" . sprintf('%04d', $params['event_start_year']) . "' ";
-        }
-        if (!empty($params['event_start_month'])) {
-            $params['sql'] .= 'AND ' . App::con()->dateFormat('EH.event_startdt', '%m') . ' = ' .
-            "'" . sprintf('%02d', $params['event_start_month']) . "' ";
-        }
-        if (!empty($params['event_start_day'])) {
-            $params['sql'] .= 'AND ' . App::con()->dateFormat('EH.event_startdt', '%d') . ' = ' .
-            "'" . sprintf('%02d', $params['event_start_day']) . "' ";
-        }
-
-        if (!empty($params['event_end_year'])) {
-            $params['sql'] .= 'AND ' . App::con()->dateFormat('EH.event_enddt', '%Y') . ' = ' .
-            "'" . sprintf('%04d', $params['event_end_year']) . "' ";
-        }
-        if (!empty($params['event_end_month'])) {
-            $params['sql'] .= 'AND ' . App::con()->dateFormat('EH.event_enddt', '%m') . ' = ' .
-            "'" . sprintf('%02d', $params['event_end_month']) . "' ";
-        }
-        if (!empty($params['event_endt_day'])) {
-            $params['sql'] .= 'AND ' . App::con()->dateFormat('EH.event_enddt', '%d') . ' = ' .
-            "'" . sprintf('%02d', $params['event_end_day']) . "' ";
+        $con = App::db()->con();
+        foreach ([
+            'event_start_year'  => ['EH.event_startdt', '%Y', '%04d'],
+            'event_start_month' => ['EH.event_startdt', '%m', '%02d'],
+            'event_start_day'   => ['EH.event_startdt', '%d', '%02d'],
+            'event_end_year'    => ['EH.event_enddt', '%Y', '%04d'],
+            'event_end_month'   => ['EH.event_enddt', '%m', '%02d'],
+            'event_end_day'     => ['EH.event_enddt', '%d', '%02d'],
+        ] as $key => $def) {
+            if ($int($key) !== 0) {
+                $where .= 'AND ' . $con->dateFormat($def[0], $def[1]) . " = '" . sprintf($def[2], $int($key)) . "' ";
+            }
         }
 
         // Localization
-        if (!empty($params['event_address'])) {
-            $params['sql'] .= "AND EH.event_address = '" . App::con()->escape($params['event_address']) . "' ";
+        if ($str('event_address') !== '') {
+            $where .= 'AND EH.event_address = ' . $sql->quote($str('event_address')) . ' ';
         }
 
-        // --BEHAVIOR-- coreEventHandlerBeforeGetEvents
+        $params['sql'] = $where . $str('sql');
+
+        // --BEHAVIOR-- coreEventHandlerBeforeGetEvents -- EventHandler, array
         App::behavior()->callBehavior('coreEventHandlerBeforeGetEvents', $this, ['params' => &$params]);
 
         $rs = App::blog()->getPosts($params, $count_only, $sql);
 
-        if (empty($params['sql_only'])) {
-            $rs->eventHandler = $this;
+        if (!$count_only && empty($params['sql_only'])) {
             $rs->extend(RsExtension::class);
         }
 
-        // --BEHAVIOR-- coreEventHandlerGetEvents
+        // --BEHAVIOR-- coreEventHandlerGetEvents -- MetaRecord
         App::behavior()->callBehavior('coreEventHandlerGetEvents', $rs);
 
         return $rs;
     }
 
     /**
-     * @param array<string, mixed> $params
+     * Get events related to an entry.
+     *
+     * Parameter post_id is required.
+     *
+     * @param   array<string, mixed>|ArrayObject<string, mixed>     $params         The parameters
+     * @param   bool                                                $count_only     Only count events
      */
-    public function getEventsByPost(array $params = [], bool $count_only = false): ?MetaRecord
+    public function getEventsByPost(array|ArrayObject $params = [], bool $count_only = false): MetaRecord
     {
-        $params = self::cleanedParams($params);
-
-        if (!isset($params['post_id'])) {
-            return null;
+        $params  = $params instanceof ArrayObject ? $params->getArrayCopy() : $params;
+        $post_id = isset($params['post_id']) && is_numeric($params['post_id']) ? (int) $params['post_id'] : 0;
+        if ($post_id === 0) {
+            return MetaRecord::newFromArray([]);
         }
-        if (!isset($params['event_type'])) {
-            $params['event_type'] = $this->type;
-        }
-
-        $params['from'] .= ', ' . App::con()->prefix() . 'meta EM ';
-
-        if (str_contains((string) App::con()->driver(), 'mysql')) {
-            $params['sql'] .= 'AND EM.meta_id = CAST(P.post_id as char) ';
-        } else {
-            $params['sql'] .= 'AND CAST(EM.meta_id as int) = CAST(P.post_id as int) ';
-        }
-
-        $params['sql'] .= "AND EM.post_id = '" . App::con()->escape($params['post_id']) . "' ";
-        $params['sql'] .= "AND EM.meta_type = '" . App::con()->escape($params['event_type']) . "' ";
-
         unset($params['post_id']);
 
-        return $this->getEvents($params, $count_only);
+        $meta_type = isset($params['meta_type']) && is_string($params['meta_type']) ? $params['meta_type'] : My::META_TYPE;
+        unset($params['meta_type']);
+
+        $sql = new SelectStatement();
+        $on  = App::db()->con()->syntax() === 'mysql' ?
+            'EM.meta_id = CAST(P.post_id as char)' :
+            'CAST(EM.meta_id as int) = P.post_id';
+
+        $sql->join(
+            (new JoinStatement())
+                ->inner()
+                ->from($sql->as(App::db()->con()->prefix() . App::meta()::META_TABLE_NAME, 'EM'))
+                ->on($on)
+                ->statement()
+        );
+        $sql->and('EM.post_id = ' . $post_id);
+        $sql->and('EM.meta_type = ' . $sql->quote($meta_type));
+
+        return $this->getEvents($params, $count_only, $sql);
     }
 
     /**
-     * @param array<string, mixed> $params
+     * Get entries related to an event.
+     *
+     * Parameter event_id is required.
+     *
+     * @param   array<string, mixed>|ArrayObject<string, mixed>     $params         The parameters
+     * @param   bool                                                $count_only     Only count entries
      */
-    public function getPostsByEvent(array $params = [], bool $count_only = false): ?MetaRecord
+    public function getPostsByEvent(array|ArrayObject $params = [], bool $count_only = false): MetaRecord
     {
-        $params = self::cleanedParams($params);
+        $params   = $params instanceof ArrayObject ? $params->getArrayCopy() : $params;
+        $event_id = isset($params['event_id']) && is_numeric($params['event_id']) ? (int) $params['event_id'] : 0;
+        if ($event_id === 0) {
+            return MetaRecord::newFromArray([]);
+        }
+        unset($params['event_id']);
 
-        if (!isset($params['event_id'])) {
-            return null;
-        }
-        if (!isset($params['event_type'])) {
-            $params['event_type'] = $this->type;
-        }
+        $meta_type = isset($params['meta_type']) && is_string($params['meta_type']) ? $params['meta_type'] : My::META_TYPE;
+        unset($params['meta_type'], $params['event_type']);
+
         if (!isset($params['post_type'])) {
             $params['post_type'] = '';
         }
-        $params['from'] .= ', ' . App::con()->prefix() . 'meta EM ';
-        $params['sql'] .= 'AND EM.post_id = P.post_id ';
-        $params['sql'] .= "AND EM.meta_id = '" . App::con()->escape($params['event_id']) . "' ";
-        $params['sql'] .= "AND EM.meta_type = '" . App::con()->escape($params['event_type']) . "' ";
 
-        unset($params['event_id'],$params['event_type']);
+        $sql = new SelectStatement();
+        $sql->join(
+            (new JoinStatement())
+                ->inner()
+                ->from($sql->as(App::db()->con()->prefix() . App::meta()::META_TABLE_NAME, 'EM'))
+                ->on('EM.post_id = P.post_id')
+                ->statement()
+        );
+        $sql->and('EM.meta_id = ' . $sql->quote((string) $event_id));
+        $sql->and('EM.meta_type = ' . $sql->quote($meta_type));
 
-        return App::blog()->getPosts($params, $count_only);
+        return App::blog()->getPosts($params, $count_only, $sql);
     }
 
+    /**
+     * Count entries related to an event.
+     *
+     * @param   int     $event_id   The event ID
+     */
+    public function countPostsByEvent(int $event_id): int
+    {
+        return $this->getPostsByEvent(['event_id' => $event_id], true)->intField(0);
+    }
+
+    /**
+     * Add an event.
+     *
+     * @param   Cursor  $cur_post   The post cursor
+     * @param   Cursor  $cur_event  The event cursor
+     *
+     * @return  int     The new event ID
+     */
     public function addEvent(Cursor $cur_post, Cursor $cur_event): int
     {
         if (!App::auth()->check(App::auth()->makePermissions([
-            Auth::PERMISSION_CONTENT_ADMIN, Auth::PERMISSION_USAGE,
+            App::auth()::PERMISSION_USAGE,
+            App::auth()::PERMISSION_CONTENT_ADMIN,
         ]), App::blog()->id())) {
             throw new Exception(__('You are not allowed to create an event'));
         }
 
+        $this->getEventCursor(0, $cur_post, $cur_event);
+
+        // --BEHAVIOR-- coreEventHandlerBeforeEventAdd -- EventHandler, Cursor, Cursor
+        App::behavior()->callBehavior('coreEventHandlerBeforeEventAdd', $this, $cur_post, $cur_event);
+
+        // Blog::addPost() locks post table, so no transaction here
+        $post_id = App::blog()->addPost($cur_post);
+
         try {
-            $this->getEventCursor(null, $cur_post, $cur_event);
-
-            // --BEHAVIOR-- coreEventHandlerBeforeEventAdd
-            App::behavior()->callBehavior("coreEventHandlerBeforeEventAdd", $this, $cur_post, $cur_event);
-
-            $cur_event->post_id = App::blog()->addPost($cur_post);
+            $cur_event->setField('post_id', $post_id);
             $cur_event->insert();
         } catch (Exception $e) {
-            App::con()->rollback();
+            // Do not keep an event entry without event data
+            App::blog()->delPost($post_id);
+
             throw $e;
         }
 
-        // --BEHAVIOR-- coreEventHandlerAfterEventAdd
-        App::behavior()->callBehavior("coreEventHandlerAfterEventAdd", $this, $cur_event->post_id, $cur_post, $cur_event);
-        return $cur_event->post_id;
+        // --BEHAVIOR-- coreEventHandlerAfterEventAdd -- EventHandler, int, Cursor, Cursor
+        App::behavior()->callBehavior('coreEventHandlerAfterEventAdd', $this, $post_id, $cur_post, $cur_event);
+
+        return $post_id;
     }
 
+    /**
+     * Update an event.
+     *
+     * @param   int     $post_id    The event ID
+     * @param   Cursor  $cur_post   The post cursor
+     * @param   Cursor  $cur_event  The event cursor
+     */
     public function updEvent(int $post_id, Cursor $cur_post, Cursor $cur_event): void
     {
         if (!App::auth()->check(App::auth()->makePermissions([
-            Auth::PERMISSION_CONTENT_ADMIN, Auth::PERMISSION_USAGE,
+            App::auth()::PERMISSION_USAGE,
+            App::auth()::PERMISSION_CONTENT_ADMIN,
         ]), App::blog()->id())) {
             throw new Exception(__('You are not allowed to update events'));
         }
 
-        $post_id = (int) $post_id;
-
-        if (empty($post_id)) {
+        if ($post_id <= 0) {
             throw new Exception(__('No such event ID'));
         }
 
-        App::con()->begin();
-        try {
-            $this->getEventCursor($post_id, $cur_post, $cur_event);
+        $this->getEventCursor($post_id, $cur_post, $cur_event);
 
-            // --BEHAVIOR-- coreEventHandlerBeforeEventUpdate
+        App::db()->con()->begin();
+
+        try {
+            // --BEHAVIOR-- coreEventHandlerBeforeEventUpdate -- EventHandler, int, Cursor, Cursor
             App::behavior()->callBehavior('coreEventHandlerBeforeEventUpdate', $this, $post_id, $cur_post, $cur_event);
 
             App::blog()->updPost($post_id, $cur_post);
-            $cur_event->post_id = $post_id;
-            $cur_event->update("WHERE post_id = '" . $post_id . "' ");
+
+            // An entry changed into an event has no event row yet
+            if ($this->hasEventRow($post_id)) {
+                $cur_event->update('WHERE post_id = ' . $post_id . ' ');
+            } else {
+                $cur_event->setField('post_id', $post_id);
+                $cur_event->insert();
+            }
         } catch (Exception $e) {
-            App::con()->rollback();
+            App::db()->con()->rollback();
+
             throw $e;
         }
-        App::con()->commit();
+
+        App::db()->con()->commit();
     }
 
+    /**
+     * Delete an event.
+     *
+     * @param   int     $post_id    The event ID
+     */
     public function delEvent(int $post_id): void
     {
-        if (App::auth()->check(App::auth()->makePermissions([
-            Auth::PERMISSION_CONTENT_ADMIN, Auth::PERMISSION_DELETE,
+        if (!App::auth()->check(App::auth()->makePermissions([
+            App::auth()::PERMISSION_DELETE,
+            App::auth()::PERMISSION_CONTENT_ADMIN,
         ]), App::blog()->id())) {
             throw new Exception(__('You are not allowed to delete events'));
         }
 
-        $post_id = (int) $post_id;
-
-        if (empty($post_id)) {
+        if ($post_id <= 0) {
             throw new Exception(__('No such event ID'));
         }
 
-        // --BEHAVIOR-- coreEventHandlerEventDelete
-        App::behavior()->callBehavior("coreEventHandlerEventDelete", $this, $post_id);
+        // --BEHAVIOR-- coreEventHandlerEventDelete -- EventHandler, int
+        App::behavior()->callBehavior('coreEventHandlerEventDelete', $this, $post_id);
 
         App::blog()->delPost($post_id);
-        App::con()->execute('DELETE FROM ' . $this->table . ' ' . 'WHERE post_id = ' . $post_id . ' ');
+        $this->cleanEvent($post_id);
     }
 
-    private function getEventCursor(?int $post_id, Cursor $cur_post, Cursor $cur_event): void
+    /**
+     * Delete event row and relations to an event.
+     *
+     * Used when an event entry is deleted.
+     *
+     * @param   int     $post_id    The event ID
+     */
+    public function cleanEvent(int $post_id): void
     {
+        $sql = new DeleteStatement();
+        $sql
+            ->from($this->table)
+            ->where('post_id = ' . $post_id)
+            ->delete();
+
+        App::meta()->delMeta((string) $post_id, My::META_TYPE);
+    }
+
+    /**
+     * Check if an entry has an event row.
+     *
+     * @param   int     $post_id    The entry ID
+     */
+    public function hasEventRow(int $post_id): bool
+    {
+        $sql = new SelectStatement();
+        $rs  = $sql
+            ->column($sql->count('post_id'))
+            ->from($this->table)
+            ->where('post_id = ' . $post_id)
+            ->select();
+
+        return $rs instanceof MetaRecord && $rs->intField(0) > 0;
+    }
+
+    /**
+     * Bind an entry to an event.
+     *
+     * @param   int     $post_id    The entry ID
+     * @param   int     $event_id   The event ID
+     */
+    public function bindEvent(int $post_id, int $event_id): void
+    {
+        if ($post_id <= 0 || $event_id <= 0 || $post_id === $event_id) {
+            return;
+        }
+
+        App::meta()->delPostMeta($post_id, My::META_TYPE, (string) $event_id);
+        App::meta()->setPostMeta($post_id, My::META_TYPE, (string) $event_id);
+    }
+
+    /**
+     * Unbind an entry from an event or from all its events.
+     *
+     * @param   int     $post_id    The entry ID
+     * @param   int     $event_id   The event ID, 0 for all events
+     */
+    public function unbindEvent(int $post_id, int $event_id = 0): void
+    {
+        if ($post_id <= 0) {
+            return;
+        }
+
+        App::meta()->delPostMeta($post_id, My::META_TYPE, $event_id > 0 ? (string) $event_id : null);
+    }
+
+    /**
+     * Unbind all entries from an event.
+     *
+     * @param   int     $event_id   The event ID
+     *
+     * @return  int     Number of unbound entries
+     */
+    public function unbindPostsOfEvent(int $event_id): int
+    {
+        if ($event_id <= 0) {
+            return 0;
+        }
+
+        return count(App::meta()->delMeta((string) $event_id, My::META_TYPE));
+    }
+
+    /**
+     * Check and complete event cursors.
+     *
+     * @param   int     $post_id    The event ID (0 for new event)
+     * @param   Cursor  $cur_post   The post cursor
+     * @param   Cursor  $cur_event  The event cursor
+     */
+    private function getEventCursor(int $post_id, Cursor $cur_post, Cursor $cur_event): void
+    {
+        $field = fn (string $name): string => is_scalar($value = $cur_event->getField($name)) ? (string) $value : '';
+
         // Required a start date
-        if ($cur_event->event_startdt == '') {
+        if ($field('event_startdt') === '') {
             throw new Exception(__('No event start date'));
         }
         // Required an end date
-        if ($cur_event->event_enddt == '') {
+        if ($field('event_enddt') === '') {
             throw new Exception(__('No event end date'));
         }
         // Compare dates
-        if (strtotime((string) $cur_event->event_enddt) < strtotime((string) $cur_event->event_startdt)) {
+        if (strtotime($field('event_enddt')) < strtotime($field('event_startdt'))) {
             throw new Exception(__('Start date greater than end date'));
         }
-        // Full coordiantes or nothing
-        if (($cur_event->event_latitude != '' && $cur_event->event_longitude == '')
-           || ($cur_event->event_latitude == '' && $cur_event->event_longitude != '')) {
+        // Full coordinates or nothing
+        if (($field('event_latitude') !== '') !== ($field('event_longitude') !== '')) {
             throw new Exception(__('Not full coordinate'));
         }
         // Coordinates format
-        if ($cur_event->event_latitude != '') {
-            if (!preg_match('/^(-|)[0-9.]+$/', (string) $cur_event->event_latitude)) {
+        foreach (['event_latitude', 'event_longitude'] as $coordinate) {
+            if ($field($coordinate) !== '' && !preg_match('/^-?[0-9]+(\.[0-9]+)?$/', $field($coordinate))) {
                 throw new Exception(__('Wrong format of coordinate'));
             }
         }
-        // Coordinates format
-        if ($cur_event->event_longitude != '') {
-            if (!preg_match('/^(-|)[0-9.]+$/', (string) $cur_event->event_longitude)) {
-                throw new Exception(__('Wrong format of coordinate'));
-            }
-        }
+
         // Set post type
-        if (!$post_id && $cur_post->post_type == '') {
-            $cur_post->post_type = $this->type;
-        }
+        $cur_post->setField('post_type', $this->type);
 
-        // Force no comment
-        $cur_post->unsetField('post_open_comment');
-        $cur_post->post_open_comment = 0;
-
-        // Force no trackback
-        $cur_post->unsetField('post_open_tb');
-        $cur_post->post_open_tb = 0;
+        // Force no comment and no trackback
+        $cur_post->setField('post_open_comment', 0);
+        $cur_post->setField('post_open_tb', 0);
 
         // unset post_id
         $cur_event->unsetField('post_id');
 
-        // --BEHAVIOR-- coreEventHandlerGetEventCursor
+        // --BEHAVIOR-- coreEventHandlerGetEventCursor -- EventHandler, int, Cursor, Cursor
         App::behavior()->callBehavior('coreEventHandlerGetEventCursor', $this, $post_id, $cur_post, $cur_event);
     }
 
-    // Get human readable duration from integer
-    public static function getReadableDuration(int $timestamp, string $format = 'second'): string
+    /**
+     * Get human readable duration from timestamp.
+     *
+     * @param   int     $timestamp  The duration in seconds
+     */
+    public static function getReadableDuration(int $timestamp): string
     {
-        $time = '';
-        //$sec = $min = $hou = $day = 0;
+        $timestamp = max(0, $timestamp);
 
-        //todo format
-        $sec = $timestamp % 60;
-        $timestamp -= $sec;
-        $timestamp /= 60;
-        $min = $timestamp % 60;
-        $timestamp -= $min;
-        $timestamp /= 60;
-        $hou = $timestamp % 24;
-        $timestamp -= $hou;
-        $timestamp /= 24;
-        $day = $timestamp;
+        $day       = intdiv($timestamp, 86400);
+        $timestamp = $timestamp % 86400;
+        $hou       = intdiv($timestamp, 3600);
+        $timestamp = $timestamp % 3600;
+        $min       = intdiv($timestamp, 60);
 
-        if ($day > 1) {
-            $time .= sprintf(__('%s days'), $day) . ' ';
+        $time = [];
+        if ($day > 0) {
+            $time[] = $day === 1 ? __('one day') : sprintf(__('%s days'), $day);
         }
-        if ($day == 1) {
-            $time .= __('one day') . ' ';
+        if ($hou > 0) {
+            $time[] = $hou === 1 ? __('one hour') : sprintf(__('%s hours'), $hou);
         }
-        if ($hou > 1) {
-            $time .= sprintf(__('%s hours'), $hou) . ' ';
-        }
-        if ($hou == 1) {
-            $time .= __('one hour') . ' ';
-        }
-        if ($min > 1) {
-            $time .= sprintf(__('%s minutes'), $min) . ' ';
-        }
-        if ($min == 1) {
-            $time .= __('one minute') . ' ';
-        }
-        if (!$day && !$min && !$hou) {
-            $time .= __('instantaneous');
+        if ($min > 0) {
+            $time[] = $min === 1 ? __('one minute') : sprintf(__('%s minutes'), $min);
         }
 
-        return $time;
+        return $time === [] ? __('instantaneous') : implode(' ', $time);
     }
 
-    // Build HTML content for events maps
-    // markers are in RsExtension.php
+    /**
+     * Build HTML content for events maps.
+     *
+     * Markers are build in RsExtension::getMapVEvent().
+     *
+     * @param   string  $width      The map width (with unit)
+     * @param   string  $height     The map height (with unit)
+     * @param   string  $type       The map type
+     * @param   int     $zoom       The map zoom
+     * @param   int     $info       Show markers info
+     * @param   float   $lat        The map center latitude
+     * @param   float   $lng        The map center longitude
+     * @param   string  $markers    The map markers
+     */
     public static function getMapContent(string $width, string $height, string $type, int $zoom, int $info, float $lat, float $lng, string $markers): string
     {
-        $style = '';
-        if ($width || $height) {
-            $style = 'style="';
-            if ($width) {
-                $style .= 'width:' . $width . ';';
-            }
-            if ($height) {
-                $style .= 'height:' . $height . ';';
-            }
-            $style .= '" ';
+        $style = [];
+        if ($width !== '') {
+            $style[] = 'width:' . Html::escapeHTML($width) . ';';
+        }
+        if ($height !== '') {
+            $style[] = 'height:' . Html::escapeHTML($height) . ';';
         }
 
-        $res = '<div style="display:none;" class="event-map">' . "\n";
-        $res .= '<div ' . $style . 'class="event-map-place"><p>' . __("Please wait, try to create map...") . '</p></div>' . "\n";
-        $res .= '<div style="display:none;" class="event-map-info">' . "\n";
-        $res .= '<p class="event-map-info-zoom">' . $zoom . '</p>' . "\n";
-        $res .= '<p class="event-map-info-type">' . $type . '</p>' . "\n";
-        $res .= '<p class="event-map-info-info">' . $info . '</p>' . "\n";
-        $res .= '<p class="event-map-info-lat">' . $lat . '</p>' . "\n";
-        $res .= '<p class="event-map-info-lng">' . $lng . '</p>' . "\n";
+        $tile_layer = (string) My::settings()->getStr('map_tile_layer', false);
 
-        if (My::settings()->map_tile_layer) {
-            $res .= '<p class="event-map-info-tile-layer">' . My::settings()->map_tile_layer . '</p>' . "\n";
-        }
-        $res .= '</div>' . "\n";
-        $res .= $markers . "\n";
-        $res .= '</div>';
-
-        return $res;
+        return
+            '<div style="display:none;" class="event-map">' . "\n" .
+            '<div ' . ($style !== [] ? 'style="' . implode('', $style) . '" ' : '') . 'class="event-map-place"><p>' . __('Please wait, try to create map...') . '</p></div>' . "\n" .
+            '<div style="display:none;" class="event-map-info">' . "\n" .
+            '<p class="event-map-info-zoom">' . $zoom . '</p>' . "\n" .
+            '<p class="event-map-info-type">' . Html::escapeHTML($type) . '</p>' . "\n" .
+            '<p class="event-map-info-info">' . $info . '</p>' . "\n" .
+            '<p class="event-map-info-lat">' . $lat . '</p>' . "\n" .
+            '<p class="event-map-info-lng">' . $lng . '</p>' . "\n" .
+            ($tile_layer !== '' ? '<p class="event-map-info-tile-layer">' . Html::escapeHTML($tile_layer) . '</p>' . "\n" : '') .
+            '</div>' . "\n" .
+            $markers . "\n" .
+            '</div>';
     }
 }

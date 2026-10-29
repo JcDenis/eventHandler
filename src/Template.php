@@ -1,200 +1,305 @@
 <?php
-/*
- *  -- BEGIN LICENSE BLOCK ----------------------------------
- *
- *  This file is part of eventHandler, a plugin for Dotclear 2.
- *
- *  Copyright(c) 2014-2023 Nicolas Roudaire <nikrou77@gmail.com> https://www.nikrou.net
- *
- *  Copyright (c) 2009-2013 Jean-Christian Denis and contributors
- *  contact@jcdenis.fr https://chez.jcdenis.fr/
- *
- *  Licensed under the GPL version 2.0 license.
- *  A copy of this license is available in LICENSE file or at
- *  http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- *
- *  -- END LICENSE BLOCK ------------------------------------
- */
 
 declare(strict_types=1);
 
 namespace Dotclear\Plugin\eventHandler;
 
-use Dotclear\Helper\Html\Html;
-use Dotclear\Helper\Date;
 use ArrayObject;
 use Dotclear\App;
+use Dotclear\Database\MetaRecord;
+use Dotclear\Helper\Date;
+use Dotclear\Helper\Html\Html;
 
+/**
+ * @brief       eventHandler template tags.
+ * @ingroup     eventHandler
+ *
+ * Compiled templates only import Dotclear\App,
+ * other classes must be fully qualified in generated code.
+ *
+ * @author      Jean-Christian Denis
+ * @author      Nicolas Roudaire
+ * @copyright   GPL-2.0 https://www.gnu.org/licenses/gpl-2.0.html
+ */
 class Template
 {
-    public static function BlogTimezone(mixed $a): string
+    /**
+     * This plugin namespace (for generated code).
+     *
+     * @var     string  NS
+     */
+    private const NS = '\\Dotclear\\Plugin\\eventHandler\\';
+
+    /**
+     * Get a string attribute.
+     *
+     * @param   ArrayObject<string, mixed>  $attr       The attributes
+     * @param   string                      $name       The attribute name
+     * @param   string                      $default    The default value
+     */
+    private static function attr(ArrayObject $attr, string $name, string $default = ''): string
     {
-        return self::tplValue($a, 'dcCore::app()->blog->settings->system->blog_timezone');
-    }
-
-    public static function EventsURL(mixed $a): string
-    {
-        return self::tplValue($a, 'App::blog()->url().App::url()->getBase("eventhandler_list")');
-    }
-
-    public static function EventsFeedURL(mixed $a): string
-    {
-        $type = !empty($a['type']) ? $a['type'] : 'atom';
-
-        if (!preg_match('#^(rss2|atom)$#', (string) $type)) {
-            $type = 'atom';
-        }
-
-        return self::tplValue($a, 'App::blog()->url().App::url()->getBase("eventhandler_feed").(App::frontend()->context()->exists("categories") ? "/category/".App::frontend()->context()->categories->cat_url : "")."/' . $type . '"');
+        return isset($attr[$name]) && is_scalar($attr[$name]) ? (string) $attr[$name] : $default;
     }
 
     /**
-    * @param ArrayObject<string, mixed> $attr
-    */
-    public static function EventsMenuPeriod(ArrayObject $attr, string $content): string
+     * Get a value with filters.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     * @param   string                      $value  The PHP code of the value
+     */
+    private static function tplValue(ArrayObject $attr, string $value): string
     {
-        $menus = !empty($attr['menus']) ? $attr['menus'] : '';
-        $separator = !empty($attr['separator']) ? $attr['separator'] : '';
-        $list = !empty($attr['list']) ? $attr['list'] : '';
-        $item = !empty($attr['item']) ? $attr['item'] : '';
-        $active_item = !empty($attr['active_item']) ? $attr['active_item'] : '';
-
-        return "<?php echo Dotclear\\Plugin\\eventHandler\\Template::EventsMenuPeriodHelper('" . addslashes((string) $menus) . "','" . addslashes((string) $separator) . "','" . addslashes((string) $list) . "','" . addslashes((string) $item) . "','" . addslashes((string) $active_item) . "'); ?>";
+        return '<?= ' . sprintf(App::frontend()->template()->getFilters($attr), $value) . ' ?>';
     }
 
+    /**
+     * Get date type from attributes.
+     *
+     * @param   ArrayObject<string, mixed>  $attr       The attributes
+     * @param   bool                        $events     Allow events dates
+     */
+    private static function dateType(ArrayObject $attr, bool $events = true): string
+    {
+        foreach ($events ? ['startdt', 'enddt', 'upddt', 'creadt'] : ['upddt', 'creadt'] as $type) {
+            if (!empty($attr[$type])) {
+                return $type;
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * Get an if block.
+     *
+     * @param   ArrayObject<string, mixed>  $attr       The attributes
+     * @param   array<int, string>          $if         The conditions
+     * @param   string                      $content    The block content
+     */
+    private static function ifBlock(ArrayObject $attr, array $if, string $content): string
+    {
+        if ($if === []) {
+            return $content;
+        }
+
+        $operator = isset($attr['operator']) && is_string($attr['operator']) ? App::frontend()->template()->getOperator($attr['operator']) : '&&';
+
+        return '<?php if(' . implode(' ' . $operator . ' ', $if) . ') : ?>' . $content . '<?php endif; ?>';
+    }
+
+    /**
+     * Get common query parameters from attributes.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    private static function commonParams(ArrayObject $attr): string
+    {
+        $p = '';
+
+        if (isset($attr['author'])) {
+            $p .= "\$params['user_id'] = " . var_export(self::attr($attr, 'author'), true) . ";\n";
+        }
+
+        if (isset($attr['category'])) {
+            $p .= "\$params['cat_url'] = " . var_export(self::attr($attr, 'category'), true) . ";\n";
+            $p .= "App::frontend()->context()::categoryPostParam(\$params);\n";
+        }
+
+        if (!empty($attr['no_category'])) {
+            $p .= "@\$params['sql'] .= ' AND P.cat_id IS NULL ';\n";
+            $p .= "unset(\$params['cat_url']);\n";
+        }
+
+        if (!empty($attr['type'])) {
+            $p .= "\$params['post_type'] = preg_split('/\\s*,\\s*/', " . var_export(self::attr($attr, 'type'), true) . ", -1, PREG_SPLIT_NO_EMPTY);\n";
+        }
+
+        if (!empty($attr['no_content'])) {
+            $p .= "\$params['no_content'] = true;\n";
+        }
+
+        if (isset($attr['selected'])) {
+            $p .= "\$params['post_selected'] = " . (int) (bool) $attr['selected'] . ";\n";
+        }
+
+        if (isset($attr['age'])) {
+            $age = App::frontend()->template()->getAge($attr);
+            $p .= $age !== '' ? "@\$params['sql'] .= ' AND P.post_dt > \\'" . $age . "\\'';\n" : '';
+        }
+
+        return $p;
+    }
+
+    /*
+     * Values
+     */
+
+    /**
+     * tpl:BlogTimezone : blog timezone.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function BlogTimezone(ArrayObject $attr): string
+    {
+        return self::tplValue($attr, 'App::blog()->settings()->get("system")->getStr("blog_timezone", false)');
+    }
+
+    /**
+     * tpl:EventsURL : events page URL.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function EventsURL(ArrayObject $attr): string
+    {
+        return self::tplValue($attr, 'App::blog()->url() . App::url()->getURLFor("eventhandler_list")');
+    }
+
+    /**
+     * tpl:EventsFeedURL type="atom|rss2" : events feed URL.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function EventsFeedURL(ArrayObject $attr): string
+    {
+        $type = self::attr($attr, 'type', 'atom');
+        if (!in_array($type, ['rss2', 'atom'])) {
+            $type = 'atom';
+        }
+
+        return self::tplValue(
+            $attr,
+            'App::blog()->url() . App::url()->getURLFor("eventhandler_feed", ' .
+            '(App::frontend()->context()->exists("categories") ? "category/" . App::frontend()->context()->categories->strField("cat_url") . "/" : "") . "' . $type . '")'
+        );
+    }
+
+    /**
+     * tpl:EventsMenuPeriod : events periods menu.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function EventsMenuPeriod(ArrayObject $attr): string
+    {
+        return '<?= ' . self::NS . 'Template::EventsMenuPeriodHelper(' .
+            var_export(self::attr($attr, 'menus'), true) . ', ' .
+            var_export(self::attr($attr, 'separator'), true) . ', ' .
+            var_export(self::attr($attr, 'list'), true) . ', ' .
+            var_export(self::attr($attr, 'item'), true) . ', ' .
+            var_export(self::attr($attr, 'active_item'), true) . ') ?>';
+    }
+
+    /**
+     * Events periods menu helper.
+     */
     public static function EventsMenuPeriodHelper(string $menus, string $separator, string $list, string $item, string $active_item): string
     {
         $default_menu = [
-            'all' => __('All'),
-            'ongoing' => __('Ongoing'),
-            'outgoing' => __('Outgoing'),
-            'scheduled' => __('Scheduled'),
-            'started' => __('Started'),
+            'all'         => __('All'),
+            'ongoing'     => __('Ongoing'),
+            'outgoing'    => __('Outgoing'),
+            'scheduled'   => __('Scheduled'),
+            'started'     => __('Started'),
             'notfinished' => __('Not finished'),
-            'finished' => __('Finished'),
+            'finished'    => __('Finished'),
         ];
 
-        $menu = $default_menu;
-        if (!empty($menus)) {
-            $final_menu = [];
-            $menus = explode(',', $menus);
-            foreach ($menus as $k) {
-                if (isset($default_menu[$k])) {
-                    $final_menu[$k] = $default_menu[$k];
-                }
-            }
-            if (!empty($final_menu)) {
-                $menu = $final_menu;
+        $menu = [];
+        foreach (explode(',', $menus) as $k) {
+            if (isset($default_menu[$k])) {
+                $menu[$k] = $default_menu[$k];
             }
         }
-
-        $separator = $separator ? Html::decodeEntities($separator) : '';
-        $list = $list ? Html::decodeEntities($list) : '<ul>%s</ul>';
-        $item = $item ? Html::decodeEntities($item) : '<li><a href="%s">%s</a>%s</li>';
-        $active_item = $active_item ? Html::decodeEntities($active_item) : '<li class="nav-active"><a href="%s">%s</a>%s</li>';
-        $url = App::blog()->url() . App::url()->getBase("eventhandler_list") . '/';
-        if (App::frontend()->context()->exists('categories')) {
-            $url .= 'category/' . App::frontend()->context()->categories->cat_url . '/';
+        if ($menu === []) {
+            $menu = $default_menu;
         }
 
-        $i = 1;
+        $separator   = $separator   !== '' ? Html::decodeEntities($separator) : '';
+        $list        = $list        !== '' ? Html::decodeEntities($list) : '<ul>%s</ul>';
+        $item        = $item        !== '' ? Html::decodeEntities($item) : '<li><a href="%s">%s</a>%s</li>';
+        $active_item = $active_item !== '' ? Html::decodeEntities($active_item) : '<li class="nav-active"><a href="%s">%s</a>%s</li>';
+
+        $url    = self::listURL();
+        $period = self::currentParam('event_period');
+
         $res = '';
+        $i   = 0;
         foreach ($menu as $id => $name) {
             $i++;
-            $sep = $separator && $i < count($menu) + 1 ? $separator : '';
-
-            if (isset(App::frontend()->context()->event_params['event_period']) && App::frontend()->context()->event_params['event_period'] == $id) {
-                $res .= sprintf($active_item, $url . $id, $name, $sep);
-            } else {
-                $res .= sprintf($item, $url . $id, $name, $sep);
-            }
+            $res .= sprintf(
+                $period === $id ? $active_item : $item,
+                $url . $id,
+                $name,
+                $i < count($menu) ? $separator : ''
+            );
         }
 
         return '<div id="eventhandler-menu-period">' . sprintf($list, $res) . '</div>';
     }
 
     /**
-    * @param ArrayObject<string, mixed> $attr
-    */
+     * tpl:EventsMenuSortOrder : events sort menu.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
     public static function EventsMenuSortOrder(ArrayObject $attr): string
     {
-        $menus = !empty($attr['menus']) ? $attr['menus'] : '';
-        $separator = !empty($attr['separator']) ? $attr['separator'] : '';
-        $list = !empty($attr['list']) ? $attr['list'] : '';
-        $item = !empty($attr['item']) ? $attr['item'] : '';
-        $active_item = !empty($attr['active_item']) ? $attr['active_item'] : '';
-
-        return "<?php echo Dotclear\\Plugin\\eventHandler\\Template::EventsMenuSortOrdertHelper('" . addslashes((string) $menus) . "','" . addslashes((string) $separator) . "','" . addslashes((string) $list) . "','" . addslashes((string) $item) . "','" . addslashes((string) $active_item) . "'); ?>";
+        return '<?= ' . self::NS . 'Template::EventsMenuSortOrdertHelper(' .
+            var_export(self::attr($attr, 'menus'), true) . ', ' .
+            var_export(self::attr($attr, 'separator'), true) . ', ' .
+            var_export(self::attr($attr, 'list'), true) . ', ' .
+            var_export(self::attr($attr, 'item'), true) . ', ' .
+            var_export(self::attr($attr, 'active_item'), true) . ') ?>';
     }
 
+    /**
+     * Events sort menu helper.
+     */
     public static function EventsMenuSortOrdertHelper(string $menus, string $separator, string $list, string $item, string $active_item): string
     {
-        $default_sort_id = [
-            'title' => 'LOWER(post_title)',
-            'selected' => 'post_selected',
-            'author' => 'LOWER(user_id)',
-            'date' => 'post_dt',
-            'startdt' => 'event_startdt',
-            'enddt' => 'event_enddt',
-        ];
         $default_sort_text = [
-            'title' => __('Title'),
+            'title'    => __('Title'),
             'selected' => __('Selected'),
-            'author' => __('Author'),
-            'date' => __('Published date'),
-            'startdt' => __('Start date'),
-            'enddt' => __('End date'),
+            'author'   => __('Author'),
+            'date'     => __('Published date'),
+            'startdt'  => __('Start date'),
+            'enddt'    => __('End date'),
         ];
 
-        $menu = $default_sort_id;
-        if (!empty($menus)) {
-            $final_menu = [];
-            $menus = explode(',', $menus);
-            foreach ($menus as $k) {
-                if (isset($default_sort_id[$k])) {
-                    $final_menu[$k] = $default_sort_id[$k];
-                }
-            }
-            if (!empty($final_menu)) {
-                $menu = $final_menu;
+        $menu = [];
+        foreach (explode(',', $menus) as $k) {
+            if (isset(UrlHandler::SORT_FIELDS[$k])) {
+                $menu[$k] = UrlHandler::SORT_FIELDS[$k];
             }
         }
-
-        $separator = $separator ? Html::decodeEntities($separator) : '';
-        $list = $list ? Html::decodeEntities($list) : '<ul>%s</ul>';
-        $item = $item ? Html::decodeEntities($item) : '<li><a href="%s">%s</a>%s</li>';
-        $active_item = $active_item ? Html::decodeEntities($active_item) : '<li class="nav-active"><a href="%s">%s</a>%s</li>';
-        $period = !empty(App::frontend()->context()->event_params['event_period']) ? App::frontend()->context()->event_params['event_period'] : 'all';
-        $url = App::blog()->url() . App::url()->getBase("eventhandler_list") . '/';
-        if (App::frontend()->context()->exists('categories')) {
-            $url .= 'category/' . App::frontend()->context()->categories->cat_url . '/';
-        }
-        $url .= $period;
-
-        $sortstr = $sortby = $sortorder = null;
-        $quoted_default_sort_id = [];
-        foreach ($default_sort_id as $k => $v) {
-            $quoted_default_sort_id[$k] = preg_quote($v);
+        if ($menu === []) {
+            $menu = UrlHandler::SORT_FIELDS;
         }
 
-        if (isset(App::frontend()->context()->event_params['order'])
-            && preg_match('/(' . implode('|', $quoted_default_sort_id) . ')\s(ASC|DESC)/i', (string) App::frontend()->context()->event_params['order'], $sortstr)) {
-            $sortby = in_array($sortstr[1], $default_sort_id) ? $sortstr[1] : '';
-            $sortorder = preg_match('#ASC#i', $sortstr[2]) ? 'asc' : 'desc';
+        $separator   = $separator   !== '' ? Html::decodeEntities($separator) : '';
+        $list        = $list        !== '' ? Html::decodeEntities($list) : '<ul>%s</ul>';
+        $item        = $item        !== '' ? Html::decodeEntities($item) : '<li><a href="%s">%s</a>%s</li>';
+        $active_item = $active_item !== '' ? Html::decodeEntities($active_item) : '<li class="nav-active"><a href="%s">%s</a>%s</li>';
+
+        $period = self::currentParam('event_period');
+        $url    = self::listURL() . ($period !== '' ? $period : 'all');
+
+        $sortby    = '';
+        $sortorder = 'asc';
+        if (preg_match('/^(.+)\s(ASC|DESC)$/i', self::currentParam('order'), $m)) {
+            $sortby    = $m[1];
+            $sortorder = strtolower($m[2]);
         }
 
-        $i = 1;
         $res = '';
-        foreach ($menu as $id => $name) {
+        $i   = 0;
+        foreach ($menu as $id => $field) {
             $i++;
-            $sep = $separator && $i < count($menu) + 1 ? $separator : '';
-
-            if ($sortby == $name) {
-                $ord = $sortorder == 'asc' ? 'desc' : 'asc';
-                $res .= sprintf($active_item, $url . '/' . $id . '/' . $ord, $default_sort_text[$id], $sep);
+            $sep = $i < count($menu) ? $separator : '';
+            if ($sortby === $field) {
+                $res .= sprintf($active_item, $url . '/' . $id . '/' . ($sortorder === 'asc' ? 'desc' : 'asc'), $default_sort_text[$id], $sep);
             } else {
-                $ord = $sortorder == 'desc' ? 'desc' : 'asc';
-                $res .= sprintf($item, $url . '/' . $id . '/' . $ord, $default_sort_text[$id], $sep);
+                $res .= sprintf($item, $url . '/' . $id . '/' . $sortorder, $default_sort_text[$id], $sep);
             }
         }
 
@@ -202,1023 +307,913 @@ class Template
     }
 
     /**
-    * @param ArrayObject<string, mixed> $attr
-    */
+     * Get current events list URL (with category).
+     */
+    private static function listURL(): string
+    {
+        $url        = App::blog()->url() . App::url()->getURLFor('eventhandler_list') . '/';
+        $categories = App::frontend()->context()->categories;
+        if ($categories instanceof MetaRecord && !$categories->isEmpty()) {
+            $url .= 'category/' . $categories->strField('cat_url') . '/';
+        }
+
+        return $url;
+    }
+
+    /**
+     * Get a current events list parameter.
+     *
+     * @param   string  $name   The parameter name
+     */
+    private static function currentParam(string $name): string
+    {
+        $params = App::frontend()->context()->event_params;
+
+        return is_array($params) && isset($params[$name]) && is_scalar($params[$name]) ? (string) $params[$name] : '';
+    }
+
+    /**
+     * tpl:EventsPeriod [fulltext="0|1"] : current events period.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
     public static function EventsPeriod(ArrayObject $attr): string
     {
-        if (!isset($attr['fulltext'])) {
-            $fulltext = 0;
-        } elseif (empty($attr['fulltext'])) {
-            $fulltext = 1;
-        } else {
-            $fulltext = 2;
-        }
+        $fulltext = !isset($attr['fulltext']) ? 0 : (empty($attr['fulltext']) ? 1 : 2);
 
-        return "<?php echo Dotclear\\Plugin\\eventHandler\\Template::EventsPeriodHelper('" . $fulltext . "'); ?>";
+        return '<?= ' . sprintf(App::frontend()->template()->getFilters($attr), self::NS . 'Template::EventsPeriodHelper(' . $fulltext . ')') . ' ?>';
     }
 
+    /**
+     * Current events period helper.
+     */
     public static function EventsPeriodHelper(int $fulltext): string
     {
-        if ($fulltext === 2) {
-            $text = [
-                'all' => __('All events'),
-                'ongoing' => __('Current events'),
-                'outgoing' => __('Event not being'),
-                'scheduled' => __('Scheduled events'),
-                'started' => __('Started events'),
+        $text = match ($fulltext) {
+            2 => [
+                'all'         => __('All events'),
+                'ongoing'     => __('Current events'),
+                'outgoing'    => __('Event not being'),
+                'scheduled'   => __('Scheduled events'),
+                'started'     => __('Started events'),
                 'notfinished' => __('Unfinished events'),
-                'finished' => __('Completed events'),
-            ];
-        } elseif ($fulltext === 1) {
-            $text = [
-                'all' => __('All'),
-                'ongoing' => __('Ongoing'),
-                'outgoing' => __('Outgoing'),
-                'scheduled' => __('Scheduled'),
-                'started' => __('Started'),
+                'finished'    => __('Completed events'),
+            ],
+            1 => [
+                'all'         => __('All'),
+                'ongoing'     => __('Ongoing'),
+                'outgoing'    => __('Outgoing'),
+                'scheduled'   => __('Scheduled'),
+                'started'     => __('Started'),
                 'notfinished' => __('Not finished'),
-                'finished' => __('Finished'),
-            ];
-        } else {
-            $text = [
-                'all' => 'all',
-                'ongoing' => 'ongoing',
-                'outgoing' => 'outgoing',
-                'scheduled' => 'scheduled',
-                'started' => 'started',
-                'notfinished' => 'notfinished',
-                'finished' => 'finished',
-            ];
-        }
-        return isset(App::frontend()->context()->event_params['event_period']) && isset($text[App::frontend()->context()->event_params['event_period']])
-        ? $text[App::frontend()->context()->event_params['event_period']] : $text['all'];
+                'finished'    => __('Finished'),
+            ],
+            default => array_combine(My::PERIODS, My::PERIODS),
+        };
+
+        $period = self::currentParam('event_period');
+
+        return $text[$period] ?? $text['all'];
     }
 
     /**
-    * @param ArrayObject<string, mixed> $attr
-    */
+     * tpl:EventsInterval [format="%m %d %Y"] : current events interval.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
     public static function EventsInterval(ArrayObject $attr): string
     {
-        $format = !empty($attr['format']) ? addslashes((string) $attr['format']) : __('%m %d %Y');
-
-        return "<?php echo Dotclear\\Plugin\\eventHandler\\Template::EventsIntervalHelper('" . $format . "'); ?>";
-    }
-
-    public static function EventsIntervalHelper(string $format): string
-    {
-        if (!empty(App::frontend()->context()->event_params['event_start_year'])) {
-            if (!empty(App::frontend()->context()->event_params['event_start_day'])) {
-                $dt = Date::str($format, mktime(0, 0, 0, App::frontend()->context()->event_params['event_start_month'], App::frontend()->context()->event_params['event_start_day'], App::frontend()->context()->event_params['event_start_year']));
-                return sprintf(__('For the day of %s'), $dt);
-            } elseif (!empty(App::frontend()->context()->event_params['event_start_month'])) {
-                $dt = Date::str(__('%m %Y'), mktime(0, 0, 0, App::frontend()->context()->event_params['event_start_month'], 1, App::frontend()->context()->event_params['event_start_year']));
-                return sprintf(__('For the month of %s'), $dt);
-            } elseif (!empty(App::frontend()->context()->event_params['event_start_year'])) {
-                return sprintf(__('For the year of %s'), App::frontend()->context()->event_params['event_start_year']);
-            } else {
-                return '';
-            }
-        } else {
-            $start = Date::dt2str($format, App::frontend()->context()->event_params['event_startdt']);
-            $end = Date::dt2str($format, App::frontend()->context()->event_params['event_enddt']);
-
-            if (strtotime((string) App::frontend()->context()->event_params['event_startdt']) < strtotime((string) App::frontend()->context()->event_params['event_enddt'])) {
-                return sprintf(__('For the period between %s and %s'), $start, $end);
-            } else {
-                return sprintf(__('For the period through %s and %s'), $end, $start);
-            }
-        }
+        return '<?= ' . sprintf(App::frontend()->template()->getFilters($attr), self::NS . 'Template::EventsIntervalHelper(' . var_export(self::attr($attr, 'format', __('%m %d %Y')), true) . ')') . ' ?>';
     }
 
     /**
-    * @param ArrayObject<string, mixed> $attr
-    */
+     * Current events interval helper.
+     */
+    public static function EventsIntervalHelper(string $format): string
+    {
+        $year  = (int) self::currentParam('event_start_year');
+        $month = (int) self::currentParam('event_start_month');
+        $day   = (int) self::currentParam('event_start_day');
+
+        if ($year !== 0) {
+            if ($day !== 0) {
+                return sprintf(__('For the day of %s'), Date::str($format, (int) mktime(0, 0, 0, $month, $day, $year)));
+            } elseif ($month !== 0) {
+                return sprintf(__('For the month of %s'), Date::str(__('%m %Y'), (int) mktime(0, 0, 0, $month, 1, $year)));
+            }
+
+            return sprintf(__('For the year of %s'), $year);
+        }
+
+        $startdt = self::currentParam('event_startdt');
+        $enddt   = self::currentParam('event_enddt');
+        if ($startdt === '' || $enddt === '') {
+            return '';
+        }
+
+        $start = Date::dt2str($format, $startdt);
+        $end   = Date::dt2str($format, $enddt);
+
+        return strtotime($startdt) < strtotime($enddt) ?
+            sprintf(__('For the period between %s and %s'), $start, $end) :
+            sprintf(__('For the period through %s and %s'), $end, $start);
+    }
+
+    /*
+     * Events page blocks
+     */
+
+    /**
+     * tpl:EventsIf [has_interval] [has_category] [has_period] [period] : events page conditions.
+     *
+     * @param   ArrayObject<string, mixed>  $attr       The attributes
+     * @param   string                      $content    The block content
+     */
     public static function EventsIf(ArrayObject $attr, string $content): string
     {
-        $if = [];
-
-        $operator = isset($attr['operator']) ? App::frontend()->template()->getOperator($attr['operator']) : '&&';
+        $if    = [];
+        $param = fn (string $name): string => self::NS . 'Template::currentEventParam("' . $name . '")';
 
         if (isset($attr['has_interval'])) {
-            $sign = (bool) $attr['has_interval'] ? '!' : '';
-            $if[] = $sign . 'empty(App::frontend()->context()->event_params["event_interval"])';
+            $if[] = ((bool) $attr['has_interval'] ? '' : '!') . '(' . $param('event_interval') . ' !== "")';
         }
 
         if (isset($attr['has_category'])) {
-            $sign = (bool) $attr['has_category'] ? '' : '!';
-            $if[] = $sign . 'App::frontend()->context()->exists("categories")';
+            $if[] = ((bool) $attr['has_category'] ? '' : '!') . 'App::frontend()->context()->exists("categories")';
         }
 
         if (isset($attr['has_period'])) {
-            if ($attr['has_period']) {
-                $if[] = '!empty(App::frontend()->context()->event_params["event_period"]) && App::frontend()->context()->event_params["event_period"] != "all"';
-            } else {
-                $if[] = 'empty(App::frontend()->context()->event_params["event_period"]) || !empty(App::frontend()->context()->event_params["event_period"]) && App::frontend()->context()->event_params["event_period"] == "all"';
-            }
+            $if[] = ((bool) $attr['has_period'] ? '' : '!') . '(' . $param('event_period') . ' !== "" && ' . $param('event_period') . ' !== "all")';
         }
 
         if (isset($attr['period'])) {
-            $if[] =
-                '(!empty(App::frontend()->context()->event_params["event_period"]) && App::frontend()->context()->event_params["event_period"] == "' . addslashes((string) $attr['period']) . '" ' .
-                '|| empty(App::frontend()->context()->event_params["event_period"]) && ("" == "' . addslashes((string) $attr['period']) . '" || "all" == "' . addslashes((string) $attr['period']) . '")))';
+            $period = self::attr($attr, 'period');
+            $if[]   = in_array($period, ['', 'all']) ?
+                '(' . $param('event_period') . ' === "" || ' . $param('event_period') . ' === "all")' :
+                '(' . $param('event_period') . ' === ' . var_export($period, true) . ')';
         }
 
-        if (!empty($if)) {
-            return '<?php if(' . implode(' ' . $operator . ' ', $if) . ') : ?>' . $content . '<?php endif; ?>';
-        } else {
-            return $content;
-        }
+        return self::ifBlock($attr, $if, $content);
     }
 
     /**
-    * @param ArrayObject<string, mixed> $attr
-    */
+     * Current events list parameter (for generated code).
+     *
+     * @param   string  $name   The parameter name
+     */
+    public static function currentEventParam(string $name): string
+    {
+        return self::currentParam($name);
+    }
+
+    /**
+     * tpl:EventsCount [value="0|1"] : events count condition.
+     *
+     * @param   ArrayObject<string, mixed>  $attr       The attributes
+     * @param   string                      $content    The block content
+     */
     public static function EventsCount(ArrayObject $attr, string $content): string
     {
-        $if = '';
-
-        if (isset($attr['value'])) {
-            $sign = (bool) $attr['value'] ? '>' : '==';
-            $if = 'App::frontend()->context()->nb_posts ' . $sign . ' 0';
-        }
-
-        if ($if) {
-            return '<?php if(' . $if . ') : ?>' . $content . '<?php endif; ?>';
-        } else {
+        if (!isset($attr['value'])) {
             return $content;
         }
+
+        return '<?php if(App::frontend()->context()->nb_posts ' . ((bool) $attr['value'] ? '>' : '==') . ' 0) : ?>' . $content . '<?php endif; ?>';
     }
 
     /**
-    * @param ArrayObject<string, mixed> $attr
-    */
+     * tpl:EventsEntries : events loop.
+     *
+     * @param   ArrayObject<string, mixed>  $attr       The attributes
+     * @param   string                      $content    The block content
+     */
     public static function EventsEntries(ArrayObject $attr, string $content): string
     {
-        $lastn = -1;
-        if (isset($attr['lastn'])) {
-            $lastn = abs((int) $attr['lastn']) + 0;
-        }
+        $lastn = isset($attr['lastn']) && is_numeric($attr['lastn']) ? abs((int) $attr['lastn']) : -1;
 
         $p = '';
+        if ($lastn !== 0) {
+            $p .= $lastn > 0 ?
+                "\$params['limit'] = " . $lastn . ";\n" :
+                "\$params['limit'] = (int) App::frontend()->context()->nb_entry_per_page;\n";
 
-        if ($lastn != 0) {
-            if ($lastn > 0) {
-                $p .= "\$params['limit'] = " . $lastn . ";\n";
-            } else {
-                $p .= "\$params['limit'] = App::frontend()->context()->nb_entry_per_page;\n";
-            }
-
-            if (!isset($attr['ignore_pagination']) || $attr['ignore_pagination'] == "0") {
-                $p .= "\$params['limit'] = [((App::frontend()->getPageNumber()-1)*\$params['limit']),\$params['limit']];\n";
-            } else {
-                $p .= "\$params['limit'] = [0, \$params['limit']];\n";
-            }
+            $p .= empty($attr['ignore_pagination']) ?
+                "\$params['limit'] = [((App::frontend()->getPageNumber() - 1) * \$params['limit']), \$params['limit']];\n" :
+                "\$params['limit'] = [0, \$params['limit']];\n";
         }
 
-        if (isset($attr['author'])) {
-            $p .= "\$params['user_id'] = '" . addslashes((string) $attr['author']) . "';\n";
-        }
-
-        if (isset($attr['category'])) {
-            $p .= "\$params['cat_url'] = '" . addslashes((string) $attr['category']) . "';\n";
-            $p .= "context::categoryPostParam(\$params);\n";
-        }
-
-        if (isset($attr['no_category']) && $attr['no_category']) {
-            $p .= "@\$params['sql'] .= ' AND P.cat_id IS NULL ';\n";
-            $p .= "unset(\$params['cat_url']);\n";
-        }
-
-        if (!empty($attr['type'])) {
-            $p .= "\$params['post_type'] = preg_split('/\s*,\s*/','" . addslashes((string) $attr['type']) . "',-1,PREG_SPLIT_NO_EMPTY);\n";
-        }
+        $p .= self::commonParams($attr);
 
         if (!empty($attr['url'])) {
-            $p .= "\$params['post_url'] = '" . addslashes((string) $attr['url']) . "';\n";
+            $p .= "\$params['post_url'] = " . var_export(self::attr($attr, 'url'), true) . ";\n";
         }
 
         if (isset($attr['period'])) {
-            $p .= "\$params['event_period'] = '" . addslashes((string) $attr['period']) . "';\n";
+            $p .= "\$params['event_period'] = " . var_export(self::attr($attr, 'period'), true) . ";\n";
         }
 
         if (empty($attr['no_context'])) {
-            $p .=
-                'if (App::frontend()->context()->exists("users")) { ' .
-                "\$params['user_id'] = App::frontend()->context()->users->user_id; " .
+            $p .= 'if (App::frontend()->context()->exists("users")) { ' .
+                "\$params['user_id'] = App::frontend()->context()->users->strField('user_id'); " .
                 "}\n";
 
-            $p .=
-                'if (App::frontend()->context()->exists("categories")) { ' .
-                "\$params['cat_id'] = App::frontend()->context()->categories->cat_id; " .
+            $p .= 'if (App::frontend()->context()->exists("categories")) { ' .
+                "\$params['cat_id'] = App::frontend()->context()->categories->intField('cat_id'); " .
+                '} else { ' .
+                "@\$params['sql'] .= " . self::NS . "My::hiddenCategoriesSql(); " .
                 "}\n";
 
-            $p .=
-                'if (App::frontend()->context()->exists("archives")) { ' .
+            $p .= 'if (App::frontend()->context()->exists("archives")) { ' .
                 "\$params['post_year'] = App::frontend()->context()->archives->year(); " .
-                "\$params['post_month'] = App::frontend()->context()->archives->month(); ";
-            if (!isset($attr['lastn'])) {
-                $p .= "unset(\$params['limit']); ";
-            }
-            $p .=
+                "\$params['post_month'] = App::frontend()->context()->archives->month(); " .
+                (!isset($attr['lastn']) ? "unset(\$params['limit']); " : '') .
                 "}\n";
 
-            $p .=
-                'if (App::frontend()->context()->exists("langs")) { ' .
-                "\$params['post_lang'] = App::frontend()->context()->langs->post_lang; " .
+            $p .= 'if (App::frontend()->context()->exists("langs")) { ' .
+                "\$params['post_lang'] = App::frontend()->context()->langs->strField('post_lang'); " .
                 "}\n";
 
-            $p .=
-                'if (isset($_search)) { ' .
+            $p .= 'if (isset($_search)) { ' .
                 "\$params['search'] = \$_search; " .
                 "}\n";
 
-            $p .= 'if (App::frontend()->context()->exists("event_params")) { ' .
+            $p .= 'if (is_array(App::frontend()->context()->event_params)) { ' .
                 "\$params = array_merge(\$params, App::frontend()->context()->event_params); " .
                 "}\n";
         }
 
         if (!empty($attr['order']) || !empty($attr['sortby'])) {
-            $p .= "\$params['order'] = '" . App::frontend()->template()->getSortByStr($attr, 'eventhandler') . "';\n";
+            $p .= "\$params['order'] = " . var_export(App::frontend()->template()->getSortByStr($attr, My::POST_TYPE), true) . ";\n";
         } else {
-            $order = $field = $table = '';
-            if (My::settings()->public_events_list_sortby && str_contains((string) My::settings()->public_events_list_sortby, ':')) {
-                [$table, $field] = explode(':', (string) My::settings()->public_events_list_sortby);
+            $sortby = (string) My::settings()->getStr('public_events_list_sortby', false);
+            $order  = (string) My::settings()->getStr('public_events_list_order', false);
+            if ($order !== '' && str_contains($sortby, ':')) {
+                [$table, $field] = explode(':', $sortby, 2);
+                /**
+                 * @var     ArrayObject<string, mixed>  $sort
+                 */
+                $sort = new ArrayObject(['order' => $order, 'sortby' => $field]);
+                $p .= "\$params['order'] = " . var_export(App::frontend()->template()->getSortByStr($sort, $table), true) . ";\n";
             }
-
-            if (My::settings()->public_events_list_order) {
-                $order = My::settings()->public_events_list_order;
-
-                $special_attr = new ArrayObject($special_attr = ['order' => $order, 'sortby' => $field]);
-                $p .= "\$params['order'] = '" . App::frontend()->template()->getSortByStr($special_attr, $table) . "';\n";
-            }
         }
 
-        if (isset($attr['no_content']) && $attr['no_content']) {
-            $p .= "\$params['no_content'] = true;\n";
-        }
-
-        if (isset($attr['selected'])) {
-            $p .= "\$params['post_selected'] = " . (int) (bool) $attr['selected'] . ";";
-        }
-
-        if (isset($attr['age'])) {
-            $age = App::frontend()->template()->getAge($attr);
-            $p .= !empty($age) ? "@\$params['sql'] .= ' AND P.post_dt > \'" . $age . "\'';\n" : '';
-        }
-
-        return
-            "<?php\n" .
-            'if(!isset($eventHandler)) { $eventHandler = new Dotclear\\Plugin\\eventHandler\\EventHandler(); } ' . "\n" .
-            '$params = []; ' . "\n" .
+        return "<?php\n" .
+            "\$params = [];\n" .
             $p .
-            'App::frontend()->context()->post_params = $params; ' . "\n" .
-            'App::frontend()->context()->posts = $eventHandler->getEvents($params); unset($params); ' . "\n" .
-            'App::frontend()->context()->nb_posts = count(App::frontend()->context()->posts); ' . "\n" .
+            'App::frontend()->context()->post_params = $params;' . "\n" .
+            'App::frontend()->context()->posts = (new ' . self::NS . 'EventHandler())->getEvents($params); unset($params);' . "\n" .
+            'App::frontend()->context()->nb_posts = App::frontend()->context()->posts->count();' . "\n" .
             "?>\n" .
             '<?php while (App::frontend()->context()->posts->fetch()) : ?>' . $content . '<?php endwhile; ' .
             'App::frontend()->context()->posts = null; App::frontend()->context()->post_params = null; ?>';
     }
 
     /**
-    * @param ArrayObject<string, mixed> $attr
-    */
+     * tpl:EventsPagination : events pagination.
+     *
+     * @param   ArrayObject<string, mixed>  $attr       The attributes
+     * @param   string                      $content    The block content
+     */
     public static function EventsPagination(ArrayObject $attr, string $content): string
     {
-        $p =
-            "<?php\n" .
-            'if(!isset($eventHandler)) { $eventHandler = new Dotclear\\Plugin\\eventHandler\\EventHandler(); } ' . "\n" .
-            '$params = App::frontend()->context()->post_params;' . "\n" .
-            'App::frontend()->context()->pagination = $eventHandler->getEvents($params,true); unset($params); ' . "\n" .
+        $p = "<?php\n" .
+            '$params = is_array(App::frontend()->context()->post_params) ? App::frontend()->context()->post_params : [];' . "\n" .
+            'App::frontend()->context()->pagination = (new ' . self::NS . 'EventHandler())->getEvents($params, true); unset($params);' . "\n" .
             "?>\n";
 
-        if (isset($attr['no_context']) && $attr['no_context']) {
+        if (!empty($attr['no_context'])) {
             return $p . $content;
         }
 
-        return
-            $p .
-            '<?php if (App::frontend()->context()->pagination->f(0) > App::frontend()->context()->posts->count()) : ?>' .
+        return $p .
+            '<?php if (App::frontend()->context()->pagination->intField(0) > App::frontend()->context()->posts->count()) : ?>' .
             $content .
             '<?php endif; ?>';
     }
 
     /**
-    * @param ArrayObject<string, mixed> $attr
-    */
-    public static function EventsEntryIf(ArrayObject $attr, string $content): string
+     * Get record conditions.
+     *
+     * @param   ArrayObject<string, mixed>  $attr       The attributes
+     * @param   string                      $rs         The record (PHP code)
+     * @param   string                      $params     The record params (PHP code)
+     *
+     * @return  array<int, string>
+     */
+    private static function eventConditions(ArrayObject $attr, string $rs, string $params): array
     {
         $if = [];
 
-        $operator = isset($attr['operator']) ? App::frontend()->template()->getOperator($attr['operator']) : '&&';
-
         if (isset($attr['has_category'])) {
-            $sign = (bool) $attr['has_category'] ? '' : '!';
-            $if[] = $sign . 'App::frontend()->context()->posts->cat_id';
+            $if[] = ((bool) $attr['has_category'] ? '' : '!') . '(' . $rs . '->strField("cat_id") !== "")';
         }
 
         if (isset($attr['has_address'])) {
-            $sign = (bool) $attr['has_address'] ? '!' : '=';
-            $if[] = "'' " . $sign . '= App::frontend()->context()->posts->event_address';
+            $if[] = ((bool) $attr['has_address'] ? '' : '!') . '(' . $rs . '->strField("event_address") !== "")';
         }
 
         if (isset($attr['has_geo'])) {
-            $sign = (bool) $attr['has_geo'] ? '' : '!';
-            $if[] = $sign . '("" != App::frontend()->context()->posts->event_latitude && "" != App::frontend()->context()->posts->event_longitude)';
+            $if[] = ((bool) $attr['has_geo'] ? '' : '!') . '(' . $rs . '->strField("event_latitude") !== "" && ' . $rs . '->strField("event_longitude") !== "")';
         }
 
         if (isset($attr['period'])) {
-            $if[] = 'App::frontend()->context()->posts->getPeriod() == "' . addslashes((string) $attr['period']) . '"';
+            $if[] = $rs . '->getPeriod() === ' . var_export(self::attr($attr, 'period'), true);
         }
 
         if (isset($attr['sameday'])) {
-            $sign = (bool) $attr['sameday'] ? '' : '!';
-            $if[] = $sign . "App::frontend()->context()->posts->isOnSameDay()";
+            $if[] = ((bool) $attr['sameday'] ? '' : '!') . $rs . '->isOnSameDay()';
         }
 
         if (isset($attr['oneday'])) {
-            $sign = (bool) $attr['oneday'] ? '' : '!';
-            $if[] = $sign . "App::frontend()->context()->posts->isOnOneDay()";
+            $if[] = ((bool) $attr['oneday'] ? '' : '!') . $rs . '->isOnOneDay()';
         }
 
-        if (!empty($attr['orderedby'])) {
-            if (str_starts_with((string) $attr['orderedby'], '!')) {
-                $sign = '!';
-                $orderedby = substr((string) $attr['orderedby'], 1);
-            } else {
-                $sign = '';
-                $orderedby = $attr['orderedby'];
+        $orderedby = self::attr($attr, 'orderedby');
+        if ($orderedby !== '') {
+            $sign = '';
+            if (str_starts_with($orderedby, '!')) {
+                $sign      = '!';
+                $orderedby = substr($orderedby, 1);
             }
-
-            $default_sort = [
-                'date' => 'post_dt',
+            $field = match ($orderedby) {
+                'date'    => 'post_dt',
                 'startdt' => 'event_startdt',
-                'enddt' => 'event_enddt',
-            ];
-
-            if (isset($default_sort[$orderedby])) {
-                $orderedby = $default_sort[$orderedby];
-
-                $if[] = $sign . "strstr(App::frontend()->context()->post_params['order'],'" . addslashes($orderedby) . "')";
+                'enddt'   => 'event_enddt',
+                default   => '',
+            };
+            if ($field !== '') {
+                $if[] = $sign . '(is_array(' . $params . ') && str_contains((string) (' . $params . '["order"] ?? ""), "' . $field . '"))';
             }
         }
 
-        if (!empty($if)) {
-            return '<?php if(' . implode(' ' . $operator . ' ', $if) . ') : ?>' . $content . '<?php endif; ?>';
-        } else {
-            return $content;
-        }
+        return $if;
     }
 
     /**
-    * @param ArrayObject<string, mixed> $attr
-    */
+     * tpl:EventsEntryIf : event conditions.
+     *
+     * @param   ArrayObject<string, mixed>  $attr       The attributes
+     * @param   string                      $content    The block content
+     */
+    public static function EventsEntryIf(ArrayObject $attr, string $content): string
+    {
+        return self::ifBlock($attr, self::eventConditions($attr, 'App::frontend()->context()->posts', 'App::frontend()->context()->post_params'), $content);
+    }
+
+    /**
+     * tpl:EventsDateHeader : first event of a day.
+     *
+     * @param   ArrayObject<string, mixed>  $attr       The attributes
+     * @param   string                      $content    The block content
+     */
     public static function EventsDateHeader(ArrayObject $attr, string $content): string
     {
-        $type = '';
-        if (!empty($attr['creadt'])) {
-            $type = 'creadt';
-        }
-        if (!empty($attr['upddt'])) {
-            $type = 'upddt';
-        }
-        if (!empty($attr['enddt'])) {
-            $type = 'enddt';
-        }
-        if (!empty($attr['startdt'])) {
-            $type = 'startdt';
-        }
-
-        return
-            "<?php " .
-            'if (App::frontend()->context()->posts->firstEventOfDay("' . $type . '")) : ?>' .
-            $content .
-            "<?php endif; ?>";
+        return '<?php if (App::frontend()->context()->posts->firstEventOfDay("' . self::dateType($attr) . '")) : ?>' . $content . '<?php endif; ?>';
     }
 
     /**
-    * @param ArrayObject<string, mixed> $attr
-    */
+     * tpl:EventsDateFooter : last event of a day.
+     *
+     * @param   ArrayObject<string, mixed>  $attr       The attributes
+     * @param   string                      $content    The block content
+     */
     public static function EventsDateFooter(ArrayObject $attr, string $content): string
     {
-        $type = '';
-        if (!empty($attr['creadt'])) {
-            $type = 'creadt';
-        }
-        if (!empty($attr['upddt'])) {
-            $type = 'upddt';
-        }
-        if (!empty($attr['enddt'])) {
-            $type = 'enddt';
-        }
-        if (!empty($attr['startdt'])) {
-            $type = 'startdt';
-        }
-
-        return
-            "<?php " .
-            'if (App::frontend()->context()->posts->lastEventOfDay("' . $type . '")) : ?>' .
-            $content .
-            "<?php endif; ?>";
-    }
-
-    public static function EventsEntryDate(mixed $a): string
-    {
-        $format = !empty($a['format']) ? addslashes((string) $a['format']) : '';
-        $iso8601 = !empty($a['iso8601']);
-        $rfc822 = !empty($a['rfc822']);
-
-        $type = '';
-        if (!empty($a['creadt'])) {
-            $type = 'creadt';
-        }
-        if (!empty($a['upddt'])) {
-            $type = 'upddt';
-        }
-        if (!empty($a['enddt'])) {
-            $type = 'enddt';
-        }
-        if (!empty($a['startdt'])) {
-            $type = 'startdt';
-        }
-
-        if ($rfc822) {
-            return self::tplValue($a, "App::frontend()->context()->posts->getEventRFC822Date('" . $type . "')");
-        } elseif ($iso8601) {
-            return self::tplValue($a, "App::frontend()->context()->posts->getEventISO8601Date('" . $type . "')");
-        } else {
-            return self::tplValue($a, "App::frontend()->context()->posts->getEventDate('" . $format . "','" . $type . "')");
-        }
-    }
-
-    public static function EventsEntryTime(mixed $a): string
-    {
-        $format = !empty($a['format']) ? addslashes((string) $a['format']) : '';
-        $type = '';
-        if (!empty($a['creadt'])) {
-            $type = 'creadt';
-        }
-        if (!empty($a['upddt'])) {
-            $type = 'upddt';
-        }
-        if (!empty($a['enddt'])) {
-            $type = 'enddt';
-        }
-        if (!empty($a['startdt'])) {
-            $type = 'startdt';
-        }
-
-        return self::tplValue($a, "App::frontend()->context()->posts->getEventTime('" . $format . "','" . $type . "')");
-    }
-
-    public static function EventsEntryCategoryURL(mixed $a): string
-    {
-        return self::tplValue($a, 'App::blog()->url().App::url()->getBase("eventhandler_list")."/category/".Html::sanitizeURL(App::frontend()->context()->posts->cat_url)');
-    }
-
-    public static function EventsEntryAddress(mixed $a): string
-    {
-        $ics = !empty($a['ics']) ? '"LOCATION;CHARSET=UTF-8:".' : '';
-
-        return self::tplValue($a, $ics . 'App::frontend()->context()->posts->event_address');
-    }
-
-    public static function EventsEntryLatitude(mixed $a): string
-    {
-        return self::tplValue($a, 'App::frontend()->context()->posts->event_latitude');
-    }
-
-    public static function EventsEntryLongitude(mixed $a): string
-    {
-        return self::tplValue($a, 'App::frontend()->context()->posts->event_longitude');
-    }
-
-    public static function EventsEntryZoom(mixed $a): string
-    {
-        return self::tplValue($a, 'App::frontend()->context()->posts->event_zoom');
-    }
-
-    public static function EventsEntryDuration(mixed $a): string
-    {
-        $format = !empty($a['format']) ? addslashes((string) $a['format']) : '';
-
-        return self::tplValue($a, "Dotclear\\Plugin\\eventHandler\\EventHandler::getReadableDuration((strtotime(App::frontend()->context()->posts->event_enddt) - strtotime(App::frontend()->context()->posts->event_startdt)),'" . $format . "')");
+        return '<?php if (App::frontend()->context()->posts->lastEventOfDay("' . self::dateType($attr) . '")) : ?>' . $content . '<?php endif; ?>';
     }
 
     /**
-    * @param ArrayObject<string, mixed> $attr
-    */
+     * Get event date value.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     * @param   string                      $rs     The record (PHP code)
+     */
+    private static function eventDate(ArrayObject $attr, string $rs): string
+    {
+        $type = self::dateType($attr);
+
+        if (!empty($attr['rfc822'])) {
+            return self::tplValue($attr, $rs . '->getEventRFC822Date("' . $type . '")');
+        } elseif (!empty($attr['iso8601'])) {
+            return self::tplValue($attr, $rs . '->getEventISO8601Date("' . $type . '")');
+        }
+
+        return self::tplValue($attr, $rs . '->getEventDate(' . var_export(self::attr($attr, 'format'), true) . ', "' . $type . '")');
+    }
+
+    /**
+     * Get event time value.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     * @param   string                      $rs     The record (PHP code)
+     */
+    private static function eventTime(ArrayObject $attr, string $rs): string
+    {
+        return self::tplValue($attr, $rs . '->getEventTime(' . var_export(self::attr($attr, 'format'), true) . ', "' . self::dateType($attr) . '")');
+    }
+
+    /**
+     * Get event duration value.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     * @param   string                      $rs     The record (PHP code)
+     */
+    private static function eventDuration(ArrayObject $attr, string $rs): string
+    {
+        return self::tplValue($attr, self::NS . 'EventHandler::getReadableDuration(' . $rs . '->getEventTS("enddt") - ' . $rs . '->getEventTS("startdt"))');
+    }
+
+    /**
+     * Get event period value.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     * @param   string                      $rs     The record (PHP code)
+     */
+    private static function eventPeriod(ArrayObject $attr, string $rs): string
+    {
+        $labels = [];
+        foreach (['scheduled', 'ongoing', 'finished'] as $period) {
+            $label           = self::attr($attr, $period, $period);
+            $labels[$period] = empty($attr['strict']) ? __($label) : $label;
+        }
+
+        return self::tplValue($attr, '(' . var_export($labels, true) . ')[' . $rs . '->getPeriod()] ?? ""');
+    }
+
+    /**
+     * Get event category URL value.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     * @param   string                      $rs     The record (PHP code)
+     */
+    private static function eventCategoryURL(ArrayObject $attr, string $rs): string
+    {
+        return self::tplValue($attr, 'App::blog()->url() . App::url()->getURLFor("eventhandler_list", "category/" . \Dotclear\Helper\Html\Html::sanitizeURL(' . $rs . '->strField("cat_url")))');
+    }
+
+    /**
+     * tpl:EventsEntryDate : event date.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function EventsEntryDate(ArrayObject $attr): string
+    {
+        return self::eventDate($attr, 'App::frontend()->context()->posts');
+    }
+
+    /**
+     * tpl:EventsEntryTime : event time.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function EventsEntryTime(ArrayObject $attr): string
+    {
+        return self::eventTime($attr, 'App::frontend()->context()->posts');
+    }
+
+    /**
+     * tpl:EventsEntryCategoryURL : event category URL on events page.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function EventsEntryCategoryURL(ArrayObject $attr): string
+    {
+        return self::eventCategoryURL($attr, 'App::frontend()->context()->posts');
+    }
+
+    /**
+     * tpl:EventsEntryAddress [ics="1"] : event address.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function EventsEntryAddress(ArrayObject $attr): string
+    {
+        return self::tplValue($attr, (!empty($attr['ics']) ? '"LOCATION;CHARSET=UTF-8:" . ' : '') . 'App::frontend()->context()->posts->strField("event_address")');
+    }
+
+    /**
+     * tpl:EventsEntryLatitude : event latitude.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function EventsEntryLatitude(ArrayObject $attr): string
+    {
+        return self::tplValue($attr, 'App::frontend()->context()->posts->strField("event_latitude")');
+    }
+
+    /**
+     * tpl:EventsEntryLongitude : event longitude.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function EventsEntryLongitude(ArrayObject $attr): string
+    {
+        return self::tplValue($attr, 'App::frontend()->context()->posts->strField("event_longitude")');
+    }
+
+    /**
+     * tpl:EventsEntryZoom : event map zoom.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function EventsEntryZoom(ArrayObject $attr): string
+    {
+        return self::tplValue($attr, '(string) App::frontend()->context()->posts->intField("event_zoom")');
+    }
+
+    /**
+     * tpl:EventsEntryDuration : event duration.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function EventsEntryDuration(ArrayObject $attr): string
+    {
+        return self::eventDuration($attr, 'App::frontend()->context()->posts');
+    }
+
+    /**
+     * tpl:EventsEntryPeriod [scheduled] [ongoing] [finished] [strict] : event period.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
     public static function EventsEntryPeriod(ArrayObject $attr): string
     {
-        $scheduled = $attr['scheduled'] ?? 'scheduled';
-        if (empty($attr['strict'])) {
-            $scheduled = __($scheduled);
-        }
-
-        $ongoing = $attr['ongoing'] ?? 'ongoing';
-        if (empty($attr['strict'])) {
-            $ongoing = __($ongoing);
-        }
-
-        $finished = $attr['finished'] ?? 'finished';
-        if (empty($attr['strict'])) {
-            $finished = __($finished);
-        }
-
-        $f = App::frontend()->template()->getFilters($attr);
-
-        return
-            "<?php \$time = time() + Dotclear\Helper\Date::getTimeOffset(App::frontend()->context()->posts->post_tz)*2;\n" .
-            "if (App::frontend()->context()->posts->getEventTS('startdt') > \$time) {\n" .
-            " echo " . sprintf($f, "'" . $scheduled . "'") . "; }\n" .
-            "elseif (App::frontend()->context()->posts->getEventTS('startdt') < \$time && App::frontend()->context()->posts->getEventTS('enddt') > \$time) {\n" .
-            " echo " . sprintf($f, "'" . $ongoing . "'") . "; }\n" .
-            "elseif (App::frontend()->context()->posts->getEventTS('enddt') < \$time) {\n" .
-            " echo " . sprintf($f, "'" . $finished . "'") . "; }\n" .
-            "unset(\$time); ?>\n";
+        return self::eventPeriod($attr, 'App::frontend()->context()->posts');
     }
 
     /**
-    * @param ArrayObject<string, mixed> $attr
-    */
+     * tpl:EventsEntryMap [map_zoom] [map_type] [map_info] : event map.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
     public static function EventsEntryMap(ArrayObject $attr): string
     {
-        if (!empty($attr['map_zoom'])) {
-            $map_zoom = abs((int) $attr['map_zoom']);
-        } else {
-            $map_zoom = '(App::frontend()->context()->posts->event_zoom)?App::frontend()->context()->posts->event_zoom:Dotclear\\Plugin\\eventHandler\\My::settings()->public_map_zoom';
-        }
-        $map_type = !empty($attr['map_type']) ? '"' . Html::escapeHTML($attr['map_type']) . '"' : 'Dotclear\\Plugin\\eventHandler\\My::settings()->public_map_type';
+        $rs       = 'App::frontend()->context()->posts';
+        $map_zoom = !empty($attr['map_zoom']) && is_numeric($attr['map_zoom']) ?
+            (string) abs((int) $attr['map_zoom']) :
+            '(' . $rs . '->intField("event_zoom") ?: (int) ' . self::NS . 'My::settings()->getInt("public_map_zoom", false))';
+        $map_type = !empty($attr['map_type']) ?
+            var_export(self::attr($attr, 'map_type'), true) :
+            '(string) ' . self::NS . 'My::settings()->getStr("public_map_type", false)';
         $map_info = isset($attr['map_info']) && $attr['map_info'] == '0' ? '0' : '1';
 
-        return '<?php
-            echo Dotclear\\Plugin\\eventHandler\\EventHandler::getMapContent("","",' . $map_type . ',' . $map_zoom . ',' . $map_info . ',
-             (float) App::frontend()->context()->posts->event_latitude, (float) App::frontend()->context()->posts->event_longitude,App::frontend()->context()->posts->getMapVEvent()
-            ); ?>';
+        return '<?php if (' . $rs . '->strField("event_latitude") !== "" && ' . $rs . '->strField("event_longitude") !== "") { echo ' . self::NS . 'EventHandler::getMapContent("", "", ' . $map_type . ', ' . $map_zoom . ', ' . $map_info . ', ' .
+            '(float) ' . $rs . '->strField("event_latitude"), (float) ' . $rs . '->strField("event_longitude"), ' . $rs . '->getMapVEvent()); } ?>';
     }
 
+    /*
+     * Events of an entry
+     */
+
     /**
-    * @param ArrayObject<string, mixed> $attr
-    */
+     * tpl:EventsOfPost : events related to current entry loop.
+     *
+     * @param   ArrayObject<string, mixed>  $attr       The attributes
+     * @param   string                      $content    The block content
+     */
     public static function EventsOfPost(ArrayObject $attr, string $content): string
     {
         $p = '';
 
-        $lastn = -1;
-        if (isset($attr['lastn'])) {
-            $lastn = abs((int) $attr['lastn']) + 0;
-            if ($lastn > 0) {
-                $p .= "\$params['limit'] = " . $lastn . ";\n";
-            }
+        if (isset($attr['lastn']) && is_numeric($attr['lastn']) && (int) $attr['lastn'] > 0) {
+            $p .= "\$params['limit'] = " . abs((int) $attr['lastn']) . ";\n";
         }
 
-        if (isset($attr['event'])) {
-            $p .= "\$params['event_id'] = '" . abs((int) $attr['event']) . "';\n";
+        if (isset($attr['event']) && is_numeric($attr['event'])) {
+            $p .= "\$params['event_id'] = " . abs((int) $attr['event']) . ";\n";
         }
 
-        if (isset($attr['author'])) {
-            $p .= "\$params['user_id'] = '" . addslashes((string) $attr['author']) . "';\n";
+        if (isset($attr['post']) && is_numeric($attr['post'])) {
+            $p .= "\$params['post_id'] = " . abs((int) $attr['post']) . ";\n";
         }
 
-        if (isset($attr['category'])) {
-            $p .= "\$params['cat_url'] = '" . addslashes((string) $attr['category']) . "';\n";
-            $p .= "context::categoryPostParam(\$params);\n";
-        }
+        $p .= self::commonParams($attr);
 
-        if (isset($attr['no_category']) && $attr['no_category']) {
-            $p .= "@\$params['sql'] .= ' AND P.cat_id IS NULL ';\n";
-            $p .= "unset(\$params['cat_url']);\n";
-        }
+        $p .= "\$params['order'] = " . var_export(App::frontend()->template()->getSortByStr($attr, !empty($attr['order']) || !empty($attr['sortby']) ? My::POST_TYPE : 'post'), true) . ";\n";
 
-        if (isset($attr['post'])) {
-            $p .= "\$params['post_id'] = '" . abs((int) $attr['post']) . "';\n";
-        }
-
-        if (!empty($attr['type'])) {
-            $p .= "\$params['post_type'] = preg_split('/\s*,\s*/','" . addslashes((string) $attr['type']) . "',-1,PREG_SPLIT_NO_EMPTY);\n";
-        }
-
-        if (!empty($attr['order']) || !empty($attr['sortby'])) {
-            $p .= "\$params['order'] = '" . App::frontend()->template()->getSortByStr($attr, 'eventhandler') . "';\n";
-        } else {
-            $p .= "\$params['order'] = '" . App::frontend()->template()->getSortByStr($attr, 'post') . "';\n";
-        }
-
-        if (isset($attr['no_content']) && $attr['no_content']) {
-            $p .= "\$params['no_content'] = true;\n";
-        }
-
-        if (isset($attr['selected'])) {
-            $p .= "\$params['post_selected'] = " . (int) (bool) $attr['selected'] . ";";
-        }
-
-        if (isset($attr['age'])) {
-            $age = App::frontend()->template()->getAge($attr);
-            $p .= !empty($age) ? "@\$params['sql'] .= ' AND P.post_dt > \'" . $age . "\'';\n" : '';
-        }
-
-        return
-            "<?php\n" .
-            'if(!isset($eventHandler)) { $eventHandler = new Dotclear\\Plugin\\eventHandler\\EventHandler(); } ' . "\n" .
-            '$params = []; ' . "\n" .
-            '$public_hidden_categories = @unserialize(Dotclear\\Plugin\\eventHandler\\My::settings()->public_hidden_categories); ' .
-            'if (is_array($public_hidden_categories)) { ' .
-            ' foreach($public_hidden_categories as $hidden_cat) { ' .
-            '  @$params[\'sql\'] .= " AND C.cat_id != \'".dcCore::app()->con->escape($hidden_cat)."\' "; ' .
-            ' } ' .
-            "} \n" .
-            'if (App::frontend()->context()->exists("posts") && App::frontend()->context()->posts->post_id) { ' .
-            '$params["post_id"] = App::frontend()->context()->posts->post_id; ' .
-            "} \n" .
+        return "<?php\n" .
+            "\$params = ['sql' => " . self::NS . "My::hiddenCategoriesSql()];\n" .
+            'if (App::frontend()->context()->exists("posts") && App::frontend()->context()->posts->intField("post_id")) { ' .
+            '$params["post_id"] = App::frontend()->context()->posts->intField("post_id"); ' .
+            "}\n" .
             $p .
-            'if (!empty($params["post_id"])) { ' . "\n" .
             'App::frontend()->context()->eventsofpost_params = $params;' . "\n" .
-            'App::frontend()->context()->eventsofpost = $eventHandler->getEventsByPost($params); unset($params); ' . "\n" .
+            'App::frontend()->context()->eventsofpost = (new ' . self::NS . 'EventHandler())->getEventsByPost($params); unset($params);' . "\n" .
             'while (App::frontend()->context()->eventsofpost->fetch()) : ?>' . $content . '<?php endwhile; ' .
-            '} ' . "\n" .
             'App::frontend()->context()->eventsofpost = null; App::frontend()->context()->eventsofpost_params = null; ?>';
     }
 
     /**
-    * @param ArrayObject<string, mixed> $attr
-    */
+     * tpl:EventsOfPostHeader : first event related to current entry.
+     *
+     * @param   ArrayObject<string, mixed>  $attr       The attributes
+     * @param   string                      $content    The block content
+     */
     public static function EventsOfPostHeader(ArrayObject $attr, string $content): string
     {
-        return
-            "<?php if (App::frontend()->context()->eventsofpost->isStart()) : ?>" .
-            $content .
-            "<?php endif; ?>";
+        return '<?php if (App::frontend()->context()->eventsofpost->isStart()) : ?>' . $content . '<?php endif; ?>';
     }
 
     /**
-    * @param ArrayObject<string, mixed> $attr
-    */
+     * tpl:EventsOfPostFooter : last event related to current entry.
+     *
+     * @param   ArrayObject<string, mixed>  $attr       The attributes
+     * @param   string                      $content    The block content
+     */
     public static function EventsOfPostFooter(ArrayObject $attr, string $content): string
     {
-        return
-            "<?php if (App::frontend()->context()->eventsofpost->isEnd()) : ?>" .
-            $content .
-            "<?php endif; ?>";
+        return '<?php if (App::frontend()->context()->eventsofpost->isEnd()) : ?>' . $content . '<?php endif; ?>';
     }
 
     /**
-    * @param ArrayObject<string, mixed> $attr
-    */
+     * tpl:EventOfPostIf : event related to current entry conditions.
+     *
+     * @param   ArrayObject<string, mixed>  $attr       The attributes
+     * @param   string                      $content    The block content
+     */
     public static function EventOfPostIf(ArrayObject $attr, string $content): string
     {
-        $if = [];
-
-        $operator = isset($attr['operator']) ? App::frontend()->template()->getOperator($attr['operator']) : '&&';
-
-        if (isset($attr['has_category'])) {
-            $sign = (bool) $attr['has_category'] ? '' : '!';
-            $if[] = $sign . 'App::frontend()->context()->eventsofpost->cat_id';
-        }
-
-        if (isset($attr['has_address'])) {
-            $sign = (bool) $attr['has_address'] ? '!' : '=';
-            $if[] = "'' " . $sign . '= App::frontend()->context()->eventsofpost->event_address';
-        }
-
-        if (isset($attr['period'])) {
-            $if[] = 'App::frontend()->context()->eventsofpost->getPeriod() == "' . addslashes((string) $attr['period']) . '"';
-        }
-
-        if (isset($attr['sameday'])) {
-            $sign = (bool) $attr['sameday'] ? '' : '!';
-            $if[] = $sign . "App::frontend()->context()->eventsofpost->isOnSameDay()";
-        }
-
-        if (isset($attr['oneday'])) {
-            $sign = (bool) $attr['oneday'] ? '' : '!';
-            $if[] = $sign . "App::frontend()->context()->eventsofpost->isOnOneDay()";
-        }
-
-        if (!empty($attr['orderedby'])) {
-            if (str_starts_with((string) $attr['orderedby'], '!')) {
-                $sign = '!';
-                $orderedby = substr((string) $attr['orderedby'], 1);
-            } else {
-                $sign = '';
-                $orderedby = $attr['orderedby'];
-            }
-
-            $default_sort = [
-                'date' => 'post_dt',
-                'startdt' => 'event_startdt',
-                'enddt' => 'event_enddt',
-            ];
-
-            if (isset($default_sort[$orderedby])) {
-                $orderedby = $default_sort[$orderedby];
-
-                $if[] = $sign . "strstr(App::frontend()->context()->eventsofpost['order'],'" . addslashes($orderedby) . "')";
-            }
-        }
-
-        if (!empty($if)) {
-            return '<?php if(' . implode(' ' . $operator . ' ', $if) . ') : ?>' . $content . '<?php endif; ?>';
-        } else {
-            return $content;
-        }
-    }
-
-    public static function EventOfPostTitle(mixed $a): string
-    {
-        return self::tplValue($a, 'App::frontend()->context()->eventsofpost->post_title');
-    }
-
-    public static function EventOfPostURL(mixed $a): string
-    {
-        return self::tplValue($a, 'App::frontend()->context()->eventsofpost->getURL()');
-    }
-
-    public static function EventOfPostDate(mixed $a): string
-    {
-        $format = !empty($a['format']) ? addslashes((string) $a['format']) : '';
-        $iso8601 = !empty($a['iso8601']);
-        $rfc822 = !empty($a['rfc822']);
-
-        $type = '';
-        if (!empty($a['creadt'])) {
-            $type = 'creadt';
-        }
-        if (!empty($a['upddt'])) {
-            $type = 'upddt';
-        }
-        if (!empty($a['enddt'])) {
-            $type = 'enddt';
-        }
-        if (!empty($a['startdt'])) {
-            $type = 'startdt';
-        }
-
-        if ($rfc822) {
-            return self::tplValue($a, "App::frontend()->context()->eventsofpost->getEventRFC822Date('" . $type . "')");
-        } elseif ($iso8601) {
-            return self::tplValue($a, "App::frontend()->context()->eventsofpost->getEventISO8601Date('" . $type . "')");
-        } else {
-            return self::tplValue($a, "App::frontend()->context()->eventsofpost->getEventDate('" . $format . "','" . $type . "')");
-        }
-    }
-
-    public static function EventOfPostTime(mixed $a): string
-    {
-        $format = !empty($a['format']) ? addslashes((string) $a['format']) : '';
-        $type = '';
-        if (!empty($a['creadt'])) {
-            $type = 'creadt';
-        }
-        if (!empty($a['upddt'])) {
-            $type = 'upddt';
-        }
-        if (!empty($a['enddt'])) {
-            $type = 'enddt';
-        }
-        if (!empty($a['startdt'])) {
-            $type = 'startdt';
-        }
-
-        return self::tplValue($a, "App::frontend()->context()->eventsofpost->getEventTime('" . $format . "','" . $type . "')");
-    }
-
-    public static function EventOfPostAuthorCommonName(mixed $a): string
-    {
-        return self::tplValue($a, 'App::frontend()->context()->eventsofpost->getAuthorCN()');
-    }
-
-    public static function EventOfPostAuthorLink(mixed $a): string
-    {
-        return self::tplValue($a, 'App::frontend()->context()->eventsofpost->getAuthorLink()');
-    }
-
-    public static function EventOfPostCategory(mixed $a): string
-    {
-        return self::tplValue($a, 'App::frontend()->context()->eventsofpost->cat_title');
-    }
-
-    public static function EventOfPostCategoryURL(mixed $a): string
-    {
-        return self::tplValue($a, 'App::blog()->url().App::url()->getBase("eventhandler_list")."/category/".Html::sanitizeURL(App::frontend()->context()->eventsofpost->cat_url)');
-    }
-
-    public static function EventOfPostAddress(mixed $a): string
-    {
-        return self::tplValue($a, 'App::frontend()->context()->eventsofpost->event_address');
-    }
-
-    public static function EventOfPostDuration(mixed $a): string
-    {
-        $format = !empty($a['format']) ? addslashes((string) $a['format']) : '';
-
-        return self::tplValue($a, "Dotclear\\Plugin\\eventHandler\\EventHandler::getReadableDuration((strtotime(App::frontend()->context()->eventsofpost->event_enddt) - strtotime(App::frontend()->context()->eventsofpost->event_startdt)),'" . $format . "')");
+        return self::ifBlock($attr, self::eventConditions($attr, 'App::frontend()->context()->eventsofpost', 'App::frontend()->context()->eventsofpost_params'), $content);
     }
 
     /**
-    * @param ArrayObject<string, mixed> $attr
-    */
-    public static function EventOfPostPeriod($attr): string
+     * tpl:EventOfPostTitle : related event title.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function EventOfPostTitle(ArrayObject $attr): string
     {
-        $scheduled = $attr['scheduled'] ?? 'scheduled';
-        if (empty($attr['strict'])) {
-            $scheduled = __($scheduled);
-        }
-
-        $ongoing = $attr['ongoing'] ?? 'ongoing';
-        if (empty($attr['strict'])) {
-            $ongoing = __($ongoing);
-        }
-
-        $finished = $attr['finished'] ?? 'finished';
-        if (empty($attr['strict'])) {
-            $finished = __($finished);
-        }
-
-        $f = App::frontend()->template()->getFilters($attr);
-
-        return
-            "<?php \$time = time() + Dotclear\Helper\Date::getTimeOffset(App::frontend()->context()->eventsofpost->post_tz)*2;\n" .
-            "if (App::frontend()->context()->eventsofpost->getEventTS('startdt') > \$time) {\n" .
-            " echo " . sprintf($f, "'" . $scheduled . "'") . "; }\n" .
-            "elseif (App::frontend()->context()->eventsofpost->getEventTS('startdt') < \$time && App::frontend()->context()->eventsofpost->getEventTS('enddt') > \$time) {\n" .
-            " echo " . sprintf($f, "'" . $ongoing . "'") . "; }\n" .
-            "elseif (App::frontend()->context()->eventsofpost->getEventTS('enddt') < \$time) {\n" .
-            " echo " . sprintf($f, "'" . $finished . "'") . "; }\n" .
-            "unset(\$time); ?>\n";
+        return self::tplValue($attr, 'App::frontend()->context()->eventsofpost->strField("post_title")');
     }
 
     /**
-    * @param ArrayObject<string, mixed> $attr
-    */
+     * tpl:EventOfPostURL : related event URL.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function EventOfPostURL(ArrayObject $attr): string
+    {
+        return self::tplValue($attr, 'App::frontend()->context()->eventsofpost->getURL()');
+    }
+
+    /**
+     * tpl:EventOfPostDate : related event date.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function EventOfPostDate(ArrayObject $attr): string
+    {
+        return self::eventDate($attr, 'App::frontend()->context()->eventsofpost');
+    }
+
+    /**
+     * tpl:EventOfPostTime : related event time.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function EventOfPostTime(ArrayObject $attr): string
+    {
+        return self::eventTime($attr, 'App::frontend()->context()->eventsofpost');
+    }
+
+    /**
+     * tpl:EventOfPostAuthorCommonName : related event author.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function EventOfPostAuthorCommonName(ArrayObject $attr): string
+    {
+        return self::tplValue($attr, 'App::frontend()->context()->eventsofpost->getAuthorCN()');
+    }
+
+    /**
+     * tpl:EventOfPostAuthorLink : related event author link.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function EventOfPostAuthorLink(ArrayObject $attr): string
+    {
+        return self::tplValue($attr, 'App::frontend()->context()->eventsofpost->getAuthorLink()');
+    }
+
+    /**
+     * tpl:EventOfPostCategory : related event category.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function EventOfPostCategory(ArrayObject $attr): string
+    {
+        return self::tplValue($attr, 'App::frontend()->context()->eventsofpost->strField("cat_title")');
+    }
+
+    /**
+     * tpl:EventOfPostCategoryURL : related event category URL on events page.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function EventOfPostCategoryURL(ArrayObject $attr): string
+    {
+        return self::eventCategoryURL($attr, 'App::frontend()->context()->eventsofpost');
+    }
+
+    /**
+     * tpl:EventOfPostAddress : related event address.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function EventOfPostAddress(ArrayObject $attr): string
+    {
+        return self::tplValue($attr, 'App::frontend()->context()->eventsofpost->strField("event_address")');
+    }
+
+    /**
+     * tpl:EventOfPostDuration : related event duration.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function EventOfPostDuration(ArrayObject $attr): string
+    {
+        return self::eventDuration($attr, 'App::frontend()->context()->eventsofpost');
+    }
+
+    /**
+     * tpl:EventOfPostPeriod : related event period.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function EventOfPostPeriod(ArrayObject $attr): string
+    {
+        return self::eventPeriod($attr, 'App::frontend()->context()->eventsofpost');
+    }
+
+    /*
+     * Entries of an event
+     */
+
+    /**
+     * tpl:PostsOfEvent : entries related to current event loop.
+     *
+     * @param   ArrayObject<string, mixed>  $attr       The attributes
+     * @param   string                      $content    The block content
+     */
     public static function PostsOfEvent(ArrayObject $attr, string $content): string
     {
         $p = '';
 
-        $lastn = -1;
-        if (isset($attr['lastn'])) {
-            $lastn = abs((int) $attr['lastn']) + 0;
-            if ($lastn > 0) {
-                $p .= "\$params['limit'] = " . $lastn . ";\n";
-            }
+        if (isset($attr['lastn']) && is_numeric($attr['lastn']) && (int) $attr['lastn'] > 0) {
+            $p .= "\$params['limit'] = " . abs((int) $attr['lastn']) . ";\n";
         }
 
-        if (isset($attr['event'])) {
-            $p .= "\$params['event_id'] = '" . abs((int) $attr['event']) . "';\n";
+        if (isset($attr['event']) && is_numeric($attr['event'])) {
+            $p .= "\$params['event_id'] = " . abs((int) $attr['event']) . ";\n";
         }
 
-        if (isset($attr['author'])) {
-            $p .= "\$params['user_id'] = '" . addslashes((string) $attr['author']) . "';\n";
-        }
+        $p .= self::commonParams($attr);
 
-        if (isset($attr['category'])) {
-            $p .= "\$params['cat_url'] = '" . addslashes((string) $attr['category']) . "';\n";
-            $p .= "context::categoryPostParam(\$params);\n";
-        }
+        $p .= "\$params['order'] = " . var_export(App::frontend()->template()->getSortByStr($attr, 'post'), true) . ";\n";
 
-        if (isset($attr['no_category']) && $attr['no_category']) {
-            $p .= "@\$params['sql'] .= ' AND P.cat_id IS NULL ';\n";
-            $p .= "unset(\$params['cat_url']);\n";
-        }
-
-        if (!empty($attr['type'])) {
-            $p .= "\$params['post_type'] = preg_split('/\s*,\s*/','" . addslashes((string) $attr['type']) . "',-1,PREG_SPLIT_NO_EMPTY);\n";
-        }
-
-        $p .= "\$params['order'] = '" . App::frontend()->template()->getSortByStr($attr, 'post') . "';\n";
-
-        if (isset($attr['no_content']) && $attr['no_content']) {
-            $p .= "\$params['no_content'] = true;\n";
-        }
-
-        if (isset($attr['selected'])) {
-            $p .= "\$params['post_selected'] = " . (int) (bool) $attr['selected'] . ";";
-        }
-
-        if (isset($attr['age'])) {
-            $age = App::frontend()->template()->getAge($attr);
-            $p .= !empty($age) ? "@\$params['sql'] .= ' AND P.post_dt > \'" . $age . "\'';\n" : '';
-        }
-
-        return
-            "<?php\n" .
-            "\$postsofeventHandler = new Dotclear\\Plugin\\eventHandler\\EventHandler(); \n" .
-            'if (App::frontend()->context()->exists("posts") && App::frontend()->context()->posts->post_id) { ' .
-            " \$params['event_id'] = App::frontend()->context()->posts->post_id; " .
-            "} \n" .
+        return "<?php\n" .
+            "\$params = [];\n" .
+            'if (App::frontend()->context()->exists("posts") && App::frontend()->context()->posts->intField("post_id")) { ' .
+            "\$params['event_id'] = App::frontend()->context()->posts->intField('post_id'); " .
+            "}\n" .
             $p .
             'App::frontend()->context()->postsofevent_params = $params;' . "\n" .
-            'App::frontend()->context()->postsofevent = $postsofeventHandler->getPostsByEvent($params); unset($params);' . "\n" .
+            'App::frontend()->context()->postsofevent = (new ' . self::NS . 'EventHandler())->getPostsByEvent($params); unset($params);' . "\n" .
             "?>\n" .
             '<?php while (App::frontend()->context()->postsofevent->fetch()) : ?>' . $content . '<?php endwhile; ' .
-            'App::frontend()->context()->postsofevent = null; App::frontend()->context()->postsofevent_params = null; $postsofeventHandler = null; ?>';
+            'App::frontend()->context()->postsofevent = null; App::frontend()->context()->postsofevent_params = null; ?>';
     }
 
     /**
-    * @param ArrayObject<string, mixed> $attr
-    */
+     * tpl:PostsOfEventHeader : first entry related to current event.
+     *
+     * @param   ArrayObject<string, mixed>  $attr       The attributes
+     * @param   string                      $content    The block content
+     */
     public static function PostsOfEventHeader(ArrayObject $attr, string $content): string
     {
-        return
-            "<?php if (App::frontend()->context()->postsofevent->isStart()) : ?>" .
-            $content .
-            "<?php endif; ?>";
+        return '<?php if (App::frontend()->context()->postsofevent->isStart()) : ?>' . $content . '<?php endif; ?>';
     }
 
     /**
-    * @param ArrayObject<string, mixed> $attr
-    */
+     * tpl:PostsOfEventFooter : last entry related to current event.
+     *
+     * @param   ArrayObject<string, mixed>  $attr       The attributes
+     * @param   string                      $content    The block content
+     */
     public static function PostsOfEventFooter(ArrayObject $attr, string $content): string
     {
-        return
-            "<?php if (App::frontend()->context()->postsofevent->isEnd()) : ?>" .
-            $content .
-            "<?php endif; ?>";
+        return '<?php if (App::frontend()->context()->postsofevent->isEnd()) : ?>' . $content . '<?php endif; ?>';
     }
 
     /**
-    * @param ArrayObject<string, mixed> $attr
-    */
+     * tpl:PostOfEventIf [type] [has_category] : entry related to current event conditions.
+     *
+     * @param   ArrayObject<string, mixed>  $attr       The attributes
+     * @param   string                      $content    The block content
+     */
     public static function PostOfEventIf(ArrayObject $attr, string $content): string
     {
         $if = [];
 
-        $operator = isset($attr['operator']) ? App::frontend()->template()->getOperator($attr['operator']) : '&&';
-
         if (isset($attr['type'])) {
-            $type = trim((string) $attr['type']);
-            $type = !empty($type) ? $type : 'post';
-            $if[] = 'App::frontend()->context()->postsofevent->post_type == "' . addslashes($type) . '"';
+            $type = trim(self::attr($attr, 'type'));
+            $if[] = 'App::frontend()->context()->postsofevent->strField("post_type") === ' . var_export($type !== '' ? $type : 'post', true);
         }
 
         if (isset($attr['has_category'])) {
-            $sign = (bool) $attr['has_category'] ? '' : '!';
-            $if[] = $sign . 'App::frontend()->context()->postsofevent->cat_id';
+            $if[] = ((bool) $attr['has_category'] ? '' : '!') . '(App::frontend()->context()->postsofevent->strField("cat_id") !== "")';
         }
 
-        if (!empty($if)) {
-            return '<?php if(' . implode(' ' . $operator . ' ', $if) . ') : ?>' . $content . '<?php endif; ?>';
-        } else {
-            return $content;
+        return self::ifBlock($attr, $if, $content);
+    }
+
+    /**
+     * tpl:PostOfEventTitle : related entry title.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function PostOfEventTitle(ArrayObject $attr): string
+    {
+        return self::tplValue($attr, 'App::frontend()->context()->postsofevent->strField("post_title")');
+    }
+
+    /**
+     * tpl:PostOfEventURL : related entry URL.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function PostOfEventURL(ArrayObject $attr): string
+    {
+        return self::tplValue($attr, 'App::frontend()->context()->postsofevent->getURL()');
+    }
+
+    /**
+     * tpl:PostOfEventDate : related entry date.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function PostOfEventDate(ArrayObject $attr): string
+    {
+        $type = self::dateType($attr, false);
+
+        if (!empty($attr['rfc822'])) {
+            return self::tplValue($attr, 'App::frontend()->context()->postsofevent->getRFC822Date("' . $type . '")');
+        } elseif (!empty($attr['iso8601'])) {
+            return self::tplValue($attr, 'App::frontend()->context()->postsofevent->getISO8601Date("' . $type . '")');
         }
+
+        return self::tplValue($attr, 'App::frontend()->context()->postsofevent->getDate(' . var_export(self::attr($attr, 'format'), true) . ', "' . $type . '")');
     }
 
-    public static function PostOfEventTitle(mixed $a): string
+    /**
+     * tpl:PostOfEventTime : related entry time.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function PostOfEventTime(ArrayObject $attr): string
     {
-        return self::tplValue($a, 'App::frontend()->context()->postsofevent->post_title');
+        return self::tplValue($attr, 'App::frontend()->context()->postsofevent->getTime(' . var_export(self::attr($attr, 'format'), true) . ', "' . self::dateType($attr, false) . '")');
     }
 
-    public static function PostOfEventURL(mixed $a): string
+    /**
+     * tpl:PostOfEventAuthorCommonName : related entry author.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function PostOfEventAuthorCommonName(ArrayObject $attr): string
     {
-        return self::tplValue($a, 'App::frontend()->context()->postsofevent->getURL()');
+        return self::tplValue($attr, 'App::frontend()->context()->postsofevent->getAuthorCN()');
     }
 
-    public static function PostOfEventDate(mixed $a): string
+    /**
+     * tpl:PostOfEventAuthorLink : related entry author link.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function PostOfEventAuthorLink(ArrayObject $attr): string
     {
-        $format = !empty($a['format']) ? addslashes((string) $a['format']) : '';
-        $iso8601 = !empty($a['iso8601']);
-        $rfc822 = !empty($a['rfc822']);
-        $type = (!empty($a['creadt']) ? 'creadt' : '');
-        $type = (!empty($a['upddt']) ? 'upddt' : '');
-
-        if ($rfc822) {
-            return self::tplValue($a, "App::frontend()->context()->postsofevent->getRFC822Date('" . $type . "')");
-        } elseif ($iso8601) {
-            return self::tplValue($a, "App::frontend()->context()->postsofevent->getISO8601Date('" . $type . "')");
-        } else {
-            return self::tplValue($a, "App::frontend()->context()->postsofevent->getDate('" . $format . "','" . $type . "')");
-        }
+        return self::tplValue($attr, 'App::frontend()->context()->postsofevent->getAuthorLink()');
     }
 
-    public static function PostOfEventTime(mixed $a): string
+    /**
+     * tpl:PostOfEventCategory : related entry category.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function PostOfEventCategory(ArrayObject $attr): string
     {
-        $format = !empty($a['format']) ? addslashes((string) $a['format']) : '';
-        $type = (!empty($a['creadt']) ? 'creadt' : '');
-        $type = (!empty($a['upddt']) ? 'upddt' : '');
-
-        return self::tplValue($a, "App::frontend()->context()->postsofevent->getTime('" . $format . "','" . $type . "')");
+        return self::tplValue($attr, 'App::frontend()->context()->postsofevent->strField("cat_title")');
     }
 
-    public static function PostOfEventAuthorCommonName(mixed $a): string
+    /**
+     * tpl:PostOfEventCategoryURL : related entry category URL.
+     *
+     * @param   ArrayObject<string, mixed>  $attr   The attributes
+     */
+    public static function PostOfEventCategoryURL(ArrayObject $attr): string
     {
-        return self::tplValue($a, 'App::frontend()->context()->postsofevent->getAuthorCN()');
-    }
-
-    public static function PostOfEventAuthorLink(mixed $a): string
-    {
-        return self::tplValue($a, 'App::frontend()->context()->postsofevent->getAuthorLink()');
-    }
-
-    public static function PostOfEventCategory(mixed $a): string
-    {
-        return self::tplValue($a, 'App::frontend()->context()->postsofevent->cat_title');
-    }
-
-    public static function PostOfEventCategoryURL(mixed $a): string
-    {
-        return self::tplValue($a, 'App::frontend()->context()->postsofevent->getCategoryURL()');
-    }
-
-    protected static function tplValue(mixed $a, string $v): string
-    {
-        return '<?php echo ' . sprintf(App::frontend()->template()->getFilters($a), $v) . '; ?>';
+        return self::tplValue($attr, 'App::frontend()->context()->postsofevent->getCategoryURL()');
     }
 }

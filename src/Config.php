@@ -1,107 +1,96 @@
 <?php
-/*
- *  -- BEGIN LICENSE BLOCK ----------------------------------
- *
- *  This file is part of eventHandler, a plugin for Dotclear 2.
- *
- *  Copyright(c) 2014-2023 Nicolas Roudaire <nikrou77@gmail.com> https://www.nikrou.net
- *
- *  Copyright (c) 2009-2013 Jean-Christian Denis and contributors
- *  contact@jcdenis.fr https://chez.jcdenis.fr/
- *
- *  Licensed under the GPL version 2.0 license.
- *  A copy of this license is available in LICENSE file or at
- *  http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- *
- *  -- END LICENSE BLOCK ------------------------------------
- */
 
 declare(strict_types=1);
 
 namespace Dotclear\Plugin\eventHandler;
 
-use Dotclear\Core\Backend\Notices;
-use Dotclear\Core\Process;
-use Dotclear\Helper\Html\Html;
-use dcCore;
 use Dotclear\App;
+use Dotclear\Core\Backend\ModulesList;
+use Dotclear\Core\Backend\Notices;
+use Dotclear\Helper\Html\Form\Checkbox;
+use Dotclear\Helper\Html\Form\Fieldset;
+use Dotclear\Helper\Html\Form\Input;
+use Dotclear\Helper\Html\Form\Label;
+use Dotclear\Helper\Html\Form\Legend;
+use Dotclear\Helper\Html\Form\Link;
+use Dotclear\Helper\Html\Form\None;
+use Dotclear\Helper\Html\Form\Note;
+use Dotclear\Helper\Html\Form\Para;
+use Dotclear\Helper\Html\Form\Select;
+use Dotclear\Helper\Html\Form\Table;
+use Dotclear\Helper\Html\Form\Tbody;
+use Dotclear\Helper\Html\Form\Td;
+use Dotclear\Helper\Html\Form\Text;
+use Dotclear\Helper\Html\Form\Textarea;
+use Dotclear\Helper\Html\Form\Th;
+use Dotclear\Helper\Html\Form\Thead;
+use Dotclear\Helper\Html\Form\Tr;
+use Dotclear\Helper\Html\Html;
+use Dotclear\Helper\Process\TraitProcess;
 use Exception;
-use form;
 
-class Config extends Process
+/**
+ * @brief       eventHandler configuration class.
+ * @ingroup     eventHandler
+ *
+ * @author      Jean-Christian Denis
+ * @author      Nicolas Roudaire
+ * @copyright   GPL-2.0 https://www.gnu.org/licenses/gpl-2.0.html
+ */
+class Config
 {
-    private static string $default_tab = 'settings';
+    use TraitProcess;
 
     public static function init(): bool
     {
-        App::backend()->eventhandler_default_tab = self::$default_tab;
-
-        App::backend()->eventhandler_active = (bool) My::settings()->active;
-        App::backend()->eventhandler_public_posts_of_event_place = (string) My::settings()->public_posts_of_event_place;
-        App::backend()->eventhandler_public_events_of_post_place = (string) My::settings()->public_events_of_post_place;
-        App::backend()->eventhandler_public_events_list_sortby = (string) My::settings()->public_events_list_sortby;
-        App::backend()->eventhandler_public_events_list_order = (string) My::settings()->public_events_list_order;
-        App::backend()->eventhandler_public_hidden_categories = @unserialize(My::settings()->public_hidden_categories);
-        if (!is_array(App::backend()->eventhandler_public_hidden_categories)) {
-            App::backend()->eventhandler_public_hidden_categories = [];
-        }
-        try {
-            App::backend()->eventhandler_categories = App::blog()->getCategories(['post_type' => 'post']);
-        } catch (Exception $e) {
-            App::error()->add($e->getMessage());
-        }
-        App::backend()->eventhandler_public_map_zoom = abs((int) My::settings()->public_map_zoom);
-        if (!App::backend()->eventhandler_public_map_zoom) {
-            App::backend()->eventhandler_public_map_zoom = 9;
-        }
-        App::backend()->eventhandler_public_map_type = (string) My::settings()->public_map_type;
-        App::backend()->eventhandler_public_extra_css = (string) My::settings()->public_extra_css;
-
-        App::backend()->eventhandler_map_provider = My::settings()->map_provider;
-        App::backend()->eventhandler_map_api_key = My::settings()->map_api_key;
-        App::backend()->eventhandler_map_tile_layer = My::settings()->map_tile_layer;
-
-        App::backend()->eventhandler_combo_place = [
-            __('hide') => '',
-            __('before content') => 'before',
-            __('after content') => 'after',
-        ];
-
-        App::backend()->eventhandler_combo_list_sortby = [
-            '' => null,
-            __('Post title') => 'post:title',
-            __('Post selected') => 'post:selected',
-            __('Post author') => 'post:author',
-            __('Post date') => 'post:date',
-            __('Post id') => 'post:id',
-            __('Event start date') => 'eventhandler:startdt',
-            __('Event end date') => 'eventhandler:enddt',
-        ];
-
-        App::backend()->eventhandler_combo_list_order = [
-            '' => null,
-            __('Ascending') => 'asc',
-            __('Descending') => 'desc',
-        ];
-
-        for ($i = 3;$i < 21;$i++) {
-            $combo_map_zoom[$i] = $i;
-        }
-        App::backend()->eventhandler_combo_map_zoom = $combo_map_zoom;
-
-        App::backend()->eventhandler_combo_map_type = [
-            __('road map') => 'ROADMAP',
-            __('satellite') => 'SATELLITE',
-            __('hybrid') => 'HYBRID',
-            __('terrain') => 'TERRAIN',
-        ];
-
-        App::backend()->eventhandler_combo_map_provider = [
-            'GoogleMaps' => 'googlemaps',
-            'OpenStreetMap' => 'osm',
-        ];
-
         return self::status(My::checkContext(My::CONFIG));
+    }
+
+    /**
+     * Content places combo.
+     *
+     * @return  array<string, string>
+     */
+    private static function placeCombo(): array
+    {
+        return [
+            __('hide')           => '',
+            __('before content') => 'before',
+            __('after content')  => 'after',
+        ];
+    }
+
+    /**
+     * Events list sort combo.
+     *
+     * @return  array<string, string>
+     */
+    private static function listSortbyCombo(): array
+    {
+        return [
+            '-'                    => '',
+            __('Post title')       => 'post:title',
+            __('Post selected')    => 'post:selected',
+            __('Post author')      => 'post:author',
+            __('Post date')        => 'post:date',
+            __('Post id')          => 'post:id',
+            __('Event start date') => 'eventhandler:startdt',
+            __('Event end date')   => 'eventhandler:enddt',
+        ];
+    }
+
+    /**
+     * Events list order combo.
+     *
+     * @return  array<string, string>
+     */
+    private static function listOrderCombo(): array
+    {
+        return [
+            '-'               => '',
+            __('Ascending')   => 'asc',
+            __('Descending')  => 'desc',
+        ];
     }
 
     public static function process(): bool
@@ -114,87 +103,49 @@ class Config extends Process
             return true;
         }
 
-        $already_active = App::backend()->eventhandler_active;
+        $str  = fn (string $name): string => isset($_POST[My::id() . $name]) && is_string($_POST[My::id() . $name]) ? $_POST[My::id() . $name] : '';
+        $pick = fn (string $name, array $combo, string $default): string => in_array($str($name), $combo, true) ? $str($name) : $default;
 
-        if (!empty($_POST['save'])) {
-            try {
-                App::backend()->eventhandler_active = isset($_POST['active']);
-                My::settings()->put('active', App::backend()->eventhandler_active, 'boolean');
+        try {
+            $s          = My::settings();
+            $was_active = My::isActive();
 
-                // change other settings only if they were in HTML page
-                if ($already_active) {
-                    if (isset($_POST['public_posts_of_event_place']) && in_array($_POST['public_posts_of_event_place'], App::backend()->eventhandler_combo_place)) {
-                        App::backend()->eventhandler_public_posts_of_event_place = $_POST['public_posts_of_event_place'];
-                    }
+            $s->put('active', !empty($_POST[My::id() . 'active']), 'boolean');
 
-                    if (isset($_POST['public_events_of_post_place']) && in_array($_POST['public_events_of_post_place'], App::backend()->eventhandler_combo_place)) {
-                        App::backend()->eventhandler_public_events_of_post_place = $_POST['public_events_of_post_place'];
-                    }
-
-                    if (isset($_POST['public_events_list_sortby']) && in_array($_POST['public_events_list_sortby'], App::backend()->eventhandler_combo_list_sortby)) {
-                        App::backend()->eventhandler_public_events_list_sortby = $_POST['public_events_list_sortby'];
-                    }
-
-                    if (isset($_POST['public_events_list_order']) && in_array($_POST['public_events_list_order'], App::backend()->eventhandler_combo_list_order)) {
-                        App::backend()->eventhandler_public_events_list_order = $_POST['public_events_list_order'];
-                    }
-
-                    if (isset($_POST['public_hidden_categories'])) {
-                        App::backend()->eventhandler_public_hidden_categories = $_POST['public_hidden_categories'];
-                    } else {
-                        App::backend()->eventhandler_public_hidden_categories = [];
-                    }
-
-                    if (!empty($_POST['public_map_zoom'])) {
-                        App::backend()->eventhandler_public_map_zoom = abs((int) $_POST['public_map_zoom']);
-                    }
-
-                    if (!App::backend()->eventhandler_public_map_zoom) {
-                        App::backend()->eventhandler_public_map_zoom = 9;
-                    }
-
-                    if (!empty($_POST['public_map_type']) && in_array($_POST['public_map_type'], App::backend()->eventhandler_combo_map_type)) {
-                        App::backend()->eventhandler_public_map_type = $_POST['public_map_type'];
-                    }
-
-                    if (!empty($_POST['public_extra_css'])) {
-                        App::backend()->eventhandler_public_extra_css = $_POST['public_extra_css'];
-                    }
-
-                    if (!empty($_POST['map_provider']) && in_array($_POST['map_provider'], App::backend()->eventhandler_combo_map_provider)) {
-                        App::backend()->eventhandler_map_provider = $_POST['map_provider'];
-                    }
-
-                    if (!empty($_POST['map_tile_layer'])) {
-                        App::backend()->eventhandler_map_tile_layer = $_POST['map_tile_layer'];
-                    }
-
-                    if (!empty($_POST['map_api_key'])) {
-                        App::backend()->eventhandler_map_api_key = $_POST['map_api_key'];
-                    }
-
-                    My::settings()->put('public_posts_of_event_place', App::backend()->eventhandler_public_posts_of_event_place, 'string');
-                    My::settings()->put('public_events_of_post_place', App::backend()->eventhandler_public_events_of_post_place, 'string');
-                    My::settings()->put('public_events_list_sortby', App::backend()->eventhandler_public_events_list_sortby, 'string');
-                    My::settings()->put('public_events_list_order', App::backend()->eventhandler_public_events_list_order, 'string');
-                    My::settings()->put('public_hidden_categories', serialize(App::backend()->eventhandler_public_hidden_categories), 'string');
-                    My::settings()->put('public_map_zoom', App::backend()->eventhandler_public_map_zoom, 'integer');
-                    My::settings()->put('public_map_type', App::backend()->eventhandler_public_map_type, 'string');
-                    My::settings()->put('public_extra_css', App::backend()->eventhandler_public_extra_css, 'string');
-                    My::settings()->put('map_provider', App::backend()->eventhandler_map_provider, 'string');
-                    My::settings()->put('map_tile_layer', App::backend()->eventhandler_map_tile_layer, 'string');
-                    My::settings()->put('map_api_key', App::backend()->eventhandler_map_api_key, 'string');
-
-                    // --BEHAVIOR-- adminEventHandlerSettingsSave
-                    App::behavior()->callBehavior("adminEventHandlerSettingsSave");
+            // Other settings are displayed only if plugin is active
+            if ($was_active) {
+                $hidden = [];
+                if (isset($_POST[My::id() . 'public_hidden_categories']) && is_array($_POST[My::id() . 'public_hidden_categories'])) {
+                    $hidden = array_values(array_map(intval(...), array_filter($_POST[My::id() . 'public_hidden_categories'], is_numeric(...))));
                 }
+                $zoom = (int) $str('public_map_zoom');
 
-                Notices::addSuccessNotice(__('Configuration has been updated.'));
+                $s->put('public_posts_of_event_place', $pick('public_posts_of_event_place', self::placeCombo(), ''), 'string');
+                $s->put('public_events_of_post_place', $pick('public_events_of_post_place', self::placeCombo(), ''), 'string');
+                $s->put('public_events_list_sortby', $pick('public_events_list_sortby', self::listSortbyCombo(), ''), 'string');
+                $s->put('public_events_list_order', $pick('public_events_list_order', self::listOrderCombo(), ''), 'string');
+                $s->put('public_hidden_categories', $hidden, 'array');
+                $s->put('public_map_zoom', $zoom > 2 && $zoom < 21 ? $zoom : 9, 'integer');
+                $s->put('public_map_type', $pick('public_map_type', My::mapTypeCombo(), 'ROADMAP'), 'string');
+                $s->put('public_extra_css', $str('public_extra_css'), 'string');
+                $s->put('map_provider', $pick('map_provider', My::mapProviderCombo(), 'osm'), 'string');
+                $s->put('map_tile_layer', $str('map_tile_layer'), 'string');
+                $s->put('map_api_key', $str('map_api_key'), 'string');
 
-                App::blog()->triggerBlog();
-            } catch (Exception $e) {
-                App::error()->add($e->getMessage());
+                // --BEHAVIOR-- adminEventHandlerSettingsSave --
+                App::behavior()->callBehavior('adminEventHandlerSettingsSave');
             }
+
+            App::blog()->triggerBlog();
+
+            Notices::addSuccessNotice(__('Configuration has been successfully updated.'));
+            App::backend()->url()->redirect('admin.plugins', [
+                'module' => My::id(),
+                'conf'   => '1',
+                'redir'  => !(App::backend()->__get('list') instanceof ModulesList) ? '' : App::backend()->__get('list')->getRedir(),
+            ]);
+        } catch (Exception $e) {
+            App::error()->add($e->getMessage());
         }
 
         return true;
@@ -206,133 +157,196 @@ class Config extends Process
             return;
         }
 
-        echo '<div class="multi-part" id="settings" title="', __('Activation'), '">';
-        if (dcCore::app()->auth->isSuperAdmin()) {
-            echo '<div class="fieldset">';
-            echo '<h3>', __('Activation'), '</h3>';
-            echo '<p>';
-            echo '<label>';
-            echo form::checkbox(['active'], 1, App::backend()->eventhandler_active), ' ', __('Enable plugin');
-            echo '</label>';
-            echo '</p>';
-            echo '</div>';
+        $s = My::settings();
+
+        echo (new Fieldset())
+            ->legend(new Legend(__('Activation')))
+            ->items([
+                (new Para())->items([
+                    (new Checkbox(My::id() . 'active', My::isActive()))
+                        ->value(1)
+                        ->label(new Label(__('Enable plugin'), Label::IL_FT)),
+                ]),
+                My::isActive() ?
+                    (new Para())->items([
+                        (new Link())
+                            ->class(['onblog_link', 'outgoing'])
+                            ->href(App::blog()->url() . App::url()->getBase('eventhandler_list'))
+                            ->text(__('View the public list of events') . ' <img alt="" src="images/outgoing-link.svg">'),
+                    ]) :
+                    (new None()),
+            ])
+            ->render();
+
+        if (!My::isActive()) {
+            echo (new Note())
+                ->class('info')
+                ->text(__('Enable plugin to configure it.'))
+                ->render();
+
+            return;
         }
-        echo '</div>';
 
-        if (App::backend()->eventhandler_active) {
-            echo '<div class="multi-part" id="configuration" title="', __('Configuration'), '">';
-            echo '<div class="fieldset">';
-            echo '<h3>', __('Additionnal style sheet:'), '</h3>';
-            echo '<p>';
-            echo '<label class="classic">';
-            echo form::textarea(['public_extra_css'], 164, 10, App::backend()->eventhandler_public_extra_css, 'maximal');
-            echo '</label>';
-            echo '</p>';
-            echo '</div>';
+        // Categories
+        $rows = [];
 
-            echo '<div class="fieldset" id="setting-event">';
-            echo '<h3>', __('Events'), '</h3>';
-            echo '<p>';
-            echo '<label for="public_posts_of_event_place">', __('Show related entries on event:'), '</label>';
-            echo form::combo(['public_posts_of_event_place'], App::backend()->eventhandler_combo_place, App::backend()->eventhandler_public_posts_of_event_place);
-            echo '</p>';
+        try {
+            $hidden     = My::hiddenCategories();
+            $categories = App::blog()->getCategories(['post_type' => 'post']);
+            while ($categories->fetch()) {
+                $cat_id    = $categories->intField('cat_id');
+                $nb_events = App::blog()->getPosts(['cat_id' => $cat_id, 'post_type' => My::POST_TYPE], true)->intField(0);
+                $nb_posts  = $categories->intField('nb_post');
 
-            echo '<h3>', __('Entries'), '</h3>';
-            echo '<p>';
-            echo '<label for="public_events_of_post_place">', __('Show related events on entry:'), '</label>';
-            echo form::combo(['public_events_of_post_place'], App::backend()->eventhandler_combo_place, App::backend()->eventhandler_public_events_of_post_place);
-            echo '</p>';
-
-            echo '<h3>', __('Events list ordering'), '</h3>';
-            echo '<div class="one-box">';
-            echo '<div class="box" style="margin-left:0">';
-            echo '<p>';
-            echo '<label for="public_events_list_sortby">', __('Default field'), '</label>';
-            echo form::combo(['public_events_list_sortby'], App::backend()->eventhandler_combo_list_sortby, App::backend()->eventhandler_public_events_list_sortby);
-            echo '</p>';
-            echo '</div>';
-            echo '<div class="box">';
-            echo '<p>';
-            echo '<label for="public_events_list_order">', __('Default order'), '</label>';
-            echo form::combo(['public_events_list_order'], App::backend()->eventhandler_combo_list_order, App::backend()->eventhandler_public_events_list_order);
-            echo '</p>';
-            echo '</div>';
-            echo '</div>';
-            echo '</div>';
-
-            echo '<div class="fieldset">';
-            echo '<h3>', __('Maps'), '</h3>';
-            echo '<p>';
-            echo '<label>', __('Default zoom on map:'), '</label>';
-            echo form::combo(['public_map_zoom'], App::backend()->eventhandler_combo_map_zoom, App::backend()->eventhandler_public_map_zoom);
-            echo '</p>';
-            echo '<p>';
-            echo '<label>', __('Default type of map:'), '</label>';
-            echo form::combo(['public_map_type'], App::backend()->eventhandler_combo_map_type, App::backend()->eventhandler_public_map_type);
-            echo '</p>';
-            echo '<p>';
-            echo '<label>', __('Map provider:'), '</label>';
-            echo form::combo('map_provider', App::backend()->eventhandler_combo_map_provider, App::backend()->eventhandler_map_provider);
-            echo '</p>';
-            echo '<p class="map-api-key">';
-            echo '<label>', __('API Key:'), '</label>';
-            echo form::field(['map_api_key'], 100, 255, App::backend()->eventhandler_map_api_key);
-            echo '</p>';
-            echo '<p class="map-api-key form-note">';
-            echo __('URL to create API Key:'), '<a href="https://console.developers.google.com/">https://console.developers.google.com/</a>';
-            echo '</p>';
-            echo '<p class="map-tile-layer">';
-            echo '<label>', __('Map tile layer:'), '</label>';
-            echo form::field(['map_tile_layer'], 100, 255, App::backend()->eventhandler_map_tile_layer);
-            echo '</p>';
-            echo '<p class="map-tile-layer form-note">';
-            echo __('Default map tile layer for OpenStreetMap.');
-            echo '</p>';
-            echo '</div>';
-            echo '</div>';
-
-            echo '<div class="multi-part" id="categories" title="', __('Categories'), '">';
-            if (count(App::backend()->eventhandler_categories) > 1) {
-                echo '<h3>', __('Categories'), '</h3>';
-                echo '<p class="info">', __('When an event has an hidden category, it will only display on its category page.'), '</p>';
-                echo '<table class="clear">';
-                echo '<tr>';
-                echo '<th>', __('Hide'), '</th>';
-                echo '<th>', __('Category'), '</th>';
-                echo '<th>', __('Level'), '</th>';
-                echo '<th>', __('Entries'), '</th>';
-                echo '<th>', __('Events'), '</th>';
-                echo '</tr>';
-                while (App::backend()->eventhandler_categories->fetch()) {
-                    $hidden = in_array(App::backend()->eventhandler_categories->cat_id, App::backend()->eventhandler_public_hidden_categories) || in_array(App::backend()->eventhandler_categories->cat_title, App::backend()->eventhandler_public_hidden_categories);
-                    $nb_events = App::blog()->getPosts(['cat_id' => App::backend()->eventhandler_categories->cat_id, 'post_type' => EventHandler::POST_TYPE], true)->f(0);
-                    if ($nb_events) {
-                        $nb_events = '<a href="' . My::manageUrl(['part' => 'events', 'cat_id' => App::backend()->eventhandler_categories->cat_id]) . '" ' .
-                 'title="' . __('List of events related to this category') . '">' . $nb_events . '</a>';
-                    }
-                    $nb_posts = App::backend()->eventhandler_categories->nb_post;
-                    if ($nb_posts) {
-                        $nb_posts = '<a href="posts.php?cat_id=' . App::backend()->eventhandler_categories->cat_id . '" title="' . __('List of entries related to this category') . '">' . $nb_posts . '</a>';
-                    }
-                    echo '<tr class="line">';
-                    echo '<td class="nowrap">', form::checkbox(['public_hidden_categories[]'], App::backend()->eventhandler_categories->cat_id, $hidden), '</td>';
-                    echo '<td class="nowrap">';
-                    echo '<a href="category.php?id=', App::backend()->eventhandler_categories->cat_id, '" title="', __('Edit this category'), '">';
-                    echo Html::escapeHTML(App::backend()->eventhandler_categories->cat_title), '</a>';
-                    echo '</td>';
-                    echo '<td class="nowrap">', App::backend()->eventhandler_categories->level, '</td>';
-                    echo '<td class="nowrap">', $nb_posts, '</td>';
-                    echo '<td class="nowrap">', $nb_events, '</td>';
-                    echo '</tr>';
-                }
-                echo '</table>';
+                $rows[] = (new Tr())
+                    ->class('line')
+                    ->items([
+                        (new Td())->class('minimal')->items([
+                            (new Checkbox([My::id() . 'public_hidden_categories[]', My::id() . 'public_hidden_categories_' . $cat_id], in_array($cat_id, $hidden, true)))
+                                ->value($cat_id),
+                        ]),
+                        (new Td())->class('nowrap')->items([
+                            (new Label(
+                                str_repeat('&nbsp;&nbsp;', max(0, $categories->intField('level') - 1)) . Html::escapeHTML($categories->strField('cat_title')),
+                                Label::OL_FT
+                            ))
+                                ->for(My::id() . 'public_hidden_categories_' . $cat_id)
+                                ->class('classic'),
+                        ]),
+                        (new Td())->class(['nowrap', 'count'])->items([
+                            $nb_posts > 0 ?
+                                (new Link())
+                                    ->href(App::backend()->url()->get('admin.posts', ['cat_id' => $cat_id]))
+                                    ->title(__('List of entries related to this category'))
+                                    ->text((string) $nb_posts) :
+                                (new Text(null, '0')),
+                        ]),
+                        (new Td())->class(['nowrap', 'count'])->items([
+                            $nb_events > 0 ?
+                                (new Link())
+                                    ->href(My::manageUrl(['part' => 'events', 'cat_id' => $cat_id]))
+                                    ->title(__('List of events related to this category'))
+                                    ->text((string) $nb_events) :
+                                (new Text(null, '0')),
+                        ]),
+                    ]);
             }
-            echo '</div>';
+        } catch (Exception $e) {
+            App::error()->add($e->getMessage());
         }
 
-        /** Add a adminEventHandlerSettings behavior handler to add a custom tab to the eventhander settings page
-         * and add a adminEventHandlerSettingsSave behavior handler to add save your custom settings.
+        echo
+        (new Fieldset())
+            ->legend(new Legend(__('Contents')))
+            ->items([
+                (new Para())->items([
+                    (new Select(My::id() . 'public_posts_of_event_place'))
+                        ->items(self::placeCombo())
+                        ->default((string) $s->getStr('public_posts_of_event_place', false))
+                        ->label(new Label(__('Show related entries on event:'), Label::OL_TF)),
+                ]),
+                (new Para())->items([
+                    (new Select(My::id() . 'public_events_of_post_place'))
+                        ->items(self::placeCombo())
+                        ->default((string) $s->getStr('public_events_of_post_place', false))
+                        ->label(new Label(__('Show related events on entry:'), Label::OL_TF)),
+                ]),
+                (new Para())->items([
+                    (new Select(My::id() . 'public_events_list_sortby'))
+                        ->items(self::listSortbyCombo())
+                        ->default((string) $s->getStr('public_events_list_sortby', false))
+                        ->label(new Label(__('Default field for ordering events list:'), Label::OL_TF)),
+                ]),
+                (new Para())->items([
+                    (new Select(My::id() . 'public_events_list_order'))
+                        ->items(self::listOrderCombo())
+                        ->default((string) $s->getStr('public_events_list_order', false))
+                        ->label(new Label(__('Default order for events list:'), Label::OL_TF)),
+                ]),
+            ])
+            ->render() .
+        (new Fieldset())
+            ->legend(new Legend(__('Maps')))
+            ->items([
+                (new Para())->items([
+                    (new Select(My::id() . 'map_provider'))
+                        ->items(My::mapProviderCombo())
+                        ->default(My::mapProvider())
+                        ->label(new Label(__('Map provider:'), Label::OL_TF)),
+                ]),
+                (new Para())->class('map-api-key')->items([
+                    (new Input(My::id() . 'map_api_key'))
+                        ->size(60)
+                        ->maxlength(255)
+                        ->value(Html::escapeHTML((string) $s->getStr('map_api_key', false)))
+                        ->label(new Label(__('API Key:'), Label::OL_TF)),
+                ]),
+                (new Note())->class(['form-note', 'map-api-key'])->text(
+                    __('URL to create API Key:') . ' <a href="https://console.developers.google.com/">https://console.developers.google.com/</a>'
+                ),
+                (new Para())->class('map-tile-layer')->items([
+                    (new Input(My::id() . 'map_tile_layer'))
+                        ->size(60)
+                        ->maxlength(255)
+                        ->value(Html::escapeHTML((string) $s->getStr('map_tile_layer', false)))
+                        ->label(new Label(__('Map tile layer:'), Label::OL_TF)),
+                ]),
+                (new Note())->class(['form-note', 'map-tile-layer'])->text(__('Default map tile layer for OpenStreetMap.')),
+                (new Para())->items([
+                    (new Select(My::id() . 'public_map_zoom'))
+                        ->items(My::mapZoomCombo())
+                        ->default((string) $s->getInt('public_map_zoom', false))
+                        ->label(new Label(__('Default zoom on map:'), Label::OL_TF)),
+                ]),
+                (new Para())->items([
+                    (new Select(My::id() . 'public_map_type'))
+                        ->items(My::mapTypeCombo())
+                        ->default((string) $s->getStr('public_map_type', false))
+                        ->label(new Label(__('Default type of map:'), Label::OL_TF)),
+                ]),
+            ])
+            ->render() .
+        (new Fieldset())
+            ->legend(new Legend(__('Categories')))
+            ->items([
+                (new Note())
+                    ->class('form-note')
+                    ->text(__('When an event has an hidden category, it will only display on its category page.')),
+                $rows === [] ?
+                    (new Note())->text(__('No category')) :
+                    (new Table())
+                        ->class('clear')
+                        ->items([
+                            (new Thead())->rows([
+                                (new Tr())->items([
+                                    (new Th())->text(__('Hide')),
+                                    (new Th())->text(__('Category')),
+                                    (new Th())->text(__('Entries')),
+                                    (new Th())->text(__('Events')),
+                                ]),
+                            ]),
+                            (new Tbody())->rows($rows),
+                        ]),
+            ])
+            ->render() .
+        (new Fieldset())
+            ->legend(new Legend(__('Additionnal style sheet:')))
+            ->items([
+                (new Para())->items([
+                    (new Textarea(My::id() . 'public_extra_css'))
+                        ->cols(164)
+                        ->rows(10)
+                        ->class('maximal')
+                        ->value(Html::escapeHTML((string) $s->getStr('public_extra_css', false))),
+                ]),
+            ])
+            ->render() .
+        My::jsLoad('settings');
+
+        /* Add a adminEventHandlerSettings behavior handler to add custom settings
+         * and add a adminEventHandlerSettingsSave behavior handler to save your custom settings.
          */
-        App::behavior()->callBehavior("adminEventHandlerSettings");
+        # --BEHAVIOR-- adminEventHandlerSettings --
+        App::behavior()->callBehavior('adminEventHandlerSettings');
     }
 }

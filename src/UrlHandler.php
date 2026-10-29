@@ -1,413 +1,420 @@
 <?php
-/*
- *  -- BEGIN LICENSE BLOCK ----------------------------------
- *
- *  This file is part of eventHandler, a plugin for Dotclear 2.
- *
- *  Copyright(c) 2014-2023 Nicolas Roudaire <nikrou77@gmail.com> https://www.nikrou.net
- *
- *  Copyright (c) 2009-2013 Jean-Christian Denis and contributors
- *  contact@jcdenis.fr https://chez.jcdenis.fr/
- *
- *  Licensed under the GPL version 2.0 license.
- *  A copy of this license is available in LICENSE file or at
- *  http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- *
- *  -- END LICENSE BLOCK ------------------------------------
- */
 
 declare(strict_types=1);
 
 namespace Dotclear\Plugin\eventHandler;
 
-use Dotclear\Helper\Html\Html;
+use ArrayObject;
 use Dotclear\App;
-use Dotclear\Core\Frontend\Url;
 use Dotclear\Database\MetaRecord;
+use Dotclear\Helper\Html\Html;
+use Exception;
 
-class UrlHandler extends Url
+/**
+ * @brief       eventHandler frontend URL handler.
+ * @ingroup     eventHandler
+ *
+ * @author      Jean-Christian Denis
+ * @author      Nicolas Roudaire
+ * @copyright   GPL-2.0 https://www.gnu.org/licenses/gpl-2.0.html
+ */
+class UrlHandler
 {
+    /**
+     * Events list sort fields.
+     *
+     * @var     array<string, string>   SORT_FIELDS
+     */
+    public const SORT_FIELDS = [
+        'title'    => 'LOWER(post_title)',
+        'selected' => 'post_selected',
+        'author'   => 'LOWER(user_id)',
+        'date'     => 'post_dt',
+        'startdt'  => 'event_startdt',
+        'enddt'    => 'event_enddt',
+    ];
+
+    /**
+     * Public REST service (calendar).
+     */
     public static function eventService(?string $args): void
     {
         App::rest()->addFunction('eventHandlerCalendar', RestMethods::calendar(...));
         App::rest()->serve();
-        exit;
+        dotclear_exit();
     }
 
-    public static function eventSingle(string $args): void
+    /**
+     * Single event page.
+     */
+    public static function eventSingle(?string $args): void
     {
-        if ($args == '' || !App::frontend()->context()->preview && !My::settings()->active) {
-            self::p404();
-        } else {
-            $is_ical = self::isIcalDocument($args);
-            $is_hcal = self::isHcalDocument($args);
-            $is_gmap = self::isGmapDocument($args);
+        $args = (string) $args;
+        if ($args === '' || !App::frontend()->context()->preview && !My::isActive()) {
+            App::url()::p404();
+        }
 
-            App::blog()->withoutPassword(false);
+        $is_ical = self::isDocument($args, '/ical.ics');
+        $is_hcal = self::isDocument($args, '/hcal.html');
+        $is_gmap = self::isDocument($args, '/gmap');
 
-            $params = [];
-            $params['post_type'] = EventHandler::POST_TYPE;
-            $params['post_url'] = $args;
+        App::blog()->withoutPassword(false);
 
-            App::frontend()->context()->eventHandler = new EventHandler();
-            App::frontend()->context()->posts = App::frontend()->context()->eventHandler->getEvents($params);
+        $posts = (new EventHandler())->getEvents([
+            'post_type' => My::POST_TYPE,
+            'post_url'  => $args,
+        ]);
 
-            App::frontend()->context()->comment_preview = [
-                'content' => '',
-                'rawcontent' => '',
-                'name' => '',
-                'mail' => '',
-                'site' => '',
-                'preview' => false,
-                'remember' => false,
-            ];
+        App::frontend()->context()->posts = $posts;
 
-            App::blog()->withoutPassword(true);
+        App::frontend()->context()->comment_preview = new ArrayObject([
+            'content'    => '',
+            'rawcontent' => '',
+            'name'       => '',
+            'mail'       => '',
+            'site'       => '',
+            'preview'    => false,
+            'remember'   => false,
+        ]);
 
-            if (App::frontend()->context()->posts->isEmpty()) {
-                // The specified page does not exist.
-                self::p404();
-            } else {
-                $post_id = App::frontend()->context()->posts->post_id;
-                $post_password = App::frontend()->context()->posts->post_password;
+        App::blog()->withoutPassword(true);
 
-                // Password protected entry
-                if ($post_password != '' && !App::frontend()->context()->preview) {
-                    // Get passwords cookie
-                    if (isset($_COOKIE['dc_passwd'])) {
-                        $pwd_cookie = unserialize($_COOKIE['dc_passwd']);
-                    } else {
-                        $pwd_cookie = [];
-                    }
+        if ($posts->isEmpty()) {
+            // The specified page does not exist.
+            App::url()::p404();
+        }
 
-                    // Check for match
-                    if ((!empty($_POST['password']) && $_POST['password'] == $post_password)
-                        || (isset($pwd_cookie[$post_id]) && $pwd_cookie[$post_id] == $post_password)) {
-                        $pwd_cookie[$post_id] = $post_password;
-                        setcookie('dc_passwd', serialize($pwd_cookie), ['expires' => 0, 'path' => '/']);
-                    } else {
-                        self::serveDocument('password-form.html', 'text/html', false);
-                    }
-                }
+        $post_id       = $posts->intField('post_id');
+        $post_password = $posts->strField('post_password');
 
-                if ($is_ical) {
-                    self::serveIcalDocument(App::frontend()->context()->posts, $args);
-                } elseif ($is_hcal) {
-                    self::serveHcalDocument(App::frontend()->context()->posts, $args);
-                } elseif ($is_gmap) {
-                    self::serveGmapDocument(App::frontend()->context()->posts, $args);
-                } else {
-                    self::serveDocument('eventhandler-single.html');
+        // Password protected entry
+        if ($post_password !== '' && !App::frontend()->context()->preview) {
+            // Get passwords cookie
+            $pwd_cookie = [];
+            if (isset($_COOKIE['dc_passwd']) && is_string($_COOKIE['dc_passwd'])) {
+                try {
+                    $pwd_cookie = (array) json_decode($_COOKIE['dc_passwd'], null, 512, JSON_THROW_ON_ERROR);
+                } catch (Exception) {
+                    $pwd_cookie = [];
                 }
             }
+
+            // Check for match (post_id key is prefixed by '#' as in core)
+            if ((!empty($_POST['password']) && is_string($_POST['password']) && $_POST['password'] === $post_password)
+                || (isset($pwd_cookie['#' . $post_id]) && $pwd_cookie['#' . $post_id] === $post_password)) {
+                $pwd_cookie['#' . $post_id] = $post_password;
+                setcookie('dc_passwd', json_encode($pwd_cookie, JSON_THROW_ON_ERROR), ['expires' => 0, 'path' => '/']);
+            } else {
+                App::url()::serveDocument('password-form.html', 'text/html', false);
+
+                return;
+            }
+        }
+
+        if ($is_ical) {
+            self::serveIcalDocument($posts, $args);
+        } elseif ($is_hcal) {
+            self::serveHcalDocument($posts, $args);
+        } elseif ($is_gmap) {
+            self::serveGmapDocument($posts);
+        } else {
+            App::url()::serveDocument('eventhandler-single.html');
         }
     }
 
-    // Preview single event from admin side
-    public static function eventPreview(string $args): void
+    /**
+     * Preview single event from admin side.
+     */
+    public static function eventPreview(?string $args): void
     {
-        if (!preg_match('#^(.+?)/([0-9a-z]{40})/(.+?)$#', $args, $m)) {
+        if (!preg_match('#^(.+?)/([0-9a-z]{40})/(.+?)$#', (string) $args, $m)) {
             // The specified Preview URL is malformed.
-            self::p404();
-        } else {
-            $user_id = $m[1];
-            $user_key = $m[2];
-            $post_url = $m[3];
-            if (!App::auth()->checkUser($user_id, null, $user_key)) {
-                // The user has no access to the entry.
-                self::p404();
-            } else {
-                App::frontend()->context()->preview = true;
-                self::eventSingle($post_url);
-            }
+            App::url()::p404();
         }
+
+        if (!App::auth()->checkUser($m[1], null, $m[2])) {
+            // The user has no access to the entry.
+            App::url()::p404();
+        }
+
+        App::frontend()->context()->preview = true;
+        if (App::config()->adminUrl() !== '') {
+            App::frontend()->context()->xframeoption = App::config()->adminUrl();
+        }
+
+        self::eventSingle($m[3]);
     }
 
-    // Multiple events page
-    public static function eventList(string $args): void
+    /**
+     * Multiple events page.
+     */
+    public static function eventList(?string $args): void
     {
-        if ($n = self::getPageNumber($args)) {
-            App::frontend()->setPageNumber($n);
-        } else {
-            App::frontend()->setPageNumber(1);
+        if (!My::isActive()) {
+            App::url()::p404();
         }
 
-        $is_ical = self::isIcalDocument($args);
-        $is_hcal = self::isHcalDocument($args);
-        $is_gmap = self::isGmapDocument($args);
+        $args = (string) $args;
+        $n    = App::url()::getPageNumber($args);
+        $args = is_string($args) ? $args : '';
+        App::frontend()->setPageNumber(is_int($n) && $n > 0 ? $n : 1);
 
-        App::frontend()->context()->event_params = self::getEventsParams($args);
+        $is_ical = self::isDocument($args, '/ical.ics');
+        $is_hcal = self::isDocument($args, '/hcal.html');
+        $is_gmap = self::isDocument($args, '/gmap');
 
-        // If it is ical do all job here
-        if ($is_hcal || $is_ical || $is_gmap) {
-            $params = [];
+        $event_params = self::getEventsParams($args);
+
+        App::frontend()->context()->event_params = $event_params;
+
+        if (!$is_hcal && !$is_ical && !$is_gmap) {
+            App::url()::serveDocument('eventhandler-list.html');
+
+            return;
+        }
+
+        // Documents: do all the job here
+        $params = ['sql' => My::hiddenCategoriesSql()];
+        if ($is_gmap) {
             // force limit on gmap
-            if ($is_gmap) {
-                $params['limit'] = [0, 30];
-            } else {
-                $pn = $n ?: 1;
-                $nbppf = App::blog()->settings()->system->nb_post_per_feed;
-                $params['limit'] = [(($pn - 1) * $nbppf), $nbppf];
-            }
-            if (App::frontend()->context()->exists("categories")) {
-                $params['cat_id'] = App::frontend()->context()->categories->cat_id;
-            }
-            $params = array_merge($params, App::frontend()->context()->event_params);
-
-            $eventHandler = new EventHandler();
-            $rs = $eventHandler->getEvents($params);
-
-            if ($is_ical) {
-                self::serveIcalDocument($rs, $args);
-            } elseif ($is_hcal) {
-                self::serveHcalDocument($rs, $args);
-            } elseif ($is_gmap) {
-                self::serveGmapDocument($rs, $args);
-            }
+            $params['limit'] = [0, 30];
         } else {
-            self::serveDocument('eventhandler-list.html');
+            $nbppf           = (int) App::blog()->settings()->get('system')->getInt('nb_post_per_feed', false);
+            $params['limit'] = [(App::frontend()->getPageNumber() - 1) * $nbppf, $nbppf];
+        }
+        $categories = App::frontend()->context()->categories;
+        if ($categories instanceof MetaRecord && !$categories->isEmpty()) {
+            $params['cat_id'] = $categories->intField('cat_id');
+            $params['sql']    = '';
+        }
+
+        $rs = (new EventHandler())->getEvents(array_merge($params, $event_params));
+
+        if ($is_ical) {
+            self::serveIcalDocument($rs, $args);
+        } elseif ($is_hcal) {
+            self::serveHcalDocument($rs, $args);
+        } else {
+            self::serveGmapDocument($rs);
         }
     }
 
-    // Classic feed
-    public static function eventFeed(string $args): void
+    /**
+     * Events feeds.
+     */
+    public static function eventFeed(?string $args): void
     {
-        $type = null;
-        $cat_url = false;
-        $params = [];
-        $subtitle = '';
+        if (!My::isActive()) {
+            App::url()::p404();
+        }
 
-        $mime = 'application/xml';
+        $args     = (string) $args;
+        $type     = '';
+        $cat_url  = '';
+        $subtitle = '';
+        $mime     = 'application/xml';
 
         if (preg_match('!^([a-z]{2}(-[a-z]{2})?)/(.*)$!', $args, $m)) {
-            $params['lang'] = $m[1];
             $args = $m[3];
 
-            App::frontend()->context()->langs = App::blog()->getLangs($params);
+            App::frontend()->context()->langs = App::blog()->getLangs(['lang' => $m[1]]);
 
             if (App::frontend()->context()->langs->isEmpty()) {
                 // The specified language does not exist.
-                self::p404();
-            } else {
-                App::frontend()->context()->cur_lang = $m[1];
+                App::url()::p404();
             }
+            App::frontend()->context()->cur_lang = $m[1];
         }
 
-        if (preg_match('#^rss2/xslt$#', $args, $m)) {
+        if (preg_match('#^rss2/xslt$#', $args)) {
             // RSS XSLT stylesheet
-            self::serveDocument('rss2.xsl', 'text/xml');
+            App::url()::serveDocument('rss2.xsl', 'text/xml');
+
+            return;
         } elseif (preg_match('#^(?:category/(.+)/)?(atom|rss2)$#', $args, $m)) {
             // All posts or comments feed
-            $type = $m[2];
-            if (!empty($m[1])) {
-                $cat_url = $m[1];
-            }
+            $type    = $m[2];
+            $cat_url = $m[1];
         } else {
             // The specified Feed URL is malformed.
-            self::p404();
+            App::url()::p404();
         }
 
-        if ($cat_url) {
-            $params['cat_url'] = $cat_url;
-            $params['post_type'] = EventHandler::POST_TYPE;
-            App::frontend()->context()->categories = App::blog()->getCategories($params);
+        if ($cat_url !== '') {
+            App::frontend()->context()->categories = App::blog()->getCategories([
+                'cat_url'   => $cat_url,
+                'post_type' => My::POST_TYPE,
+            ]);
 
             if (App::frontend()->context()->categories->isEmpty()) {
                 // The specified category does no exist.
-                self::p404();
+                App::url()::p404();
             }
 
-            $subtitle = ' - ' . App::frontend()->context()->categories->cat_title;
+            $subtitle = ' - ' . App::frontend()->context()->categories->strField('cat_title');
         }
 
-        $tpl = 'eventhandler-' . $type . '.xml';
-
-        if ($type == 'atom') {
+        if ($type === 'atom') {
             $mime = 'application/atom+xml';
         }
 
-        App::frontend()->context()->nb_entry_per_page = App::blog()->settings()->system->nb_post_per_feed;
-        App::frontend()->context()->short_feed_items = App::blog()->settings()->system->short_feed_items;
-        App::frontend()->context()->feed_subtitle = $subtitle;
+        App::frontend()->context()->nb_entry_per_page = App::blog()->settings()->get('system')->getInt('nb_post_per_feed', false);
+        App::frontend()->context()->short_feed_items  = App::blog()->settings()->get('system')->getBool('short_feed_items', false);
+        App::frontend()->context()->feed_subtitle     = $subtitle;
 
-        header('X-Robots-Tag: ' . App::frontend()->context()->robotsPolicy(App::blog()->settings()->system->robots_policy, ''));
-        self::serveDocument($tpl, $mime);
-        if (!$cat_url) {
+        header('X-Robots-Tag: ' . App::frontend()->context()::robotsPolicy((string) App::blog()->settings()->get('system')->getStr('robots_policy', false), ''));
+        App::url()::serveDocument('eventhandler-' . $type . '.xml', $mime);
+        if ($cat_url === '') {
             App::blog()->publishScheduledEntries();
         }
     }
 
-    /**  Parse URI for multiple events page
+    /**
+     * Parse URI for multiple events page.
      *
-     * @return array<string, string>
+     * @param   string  $args   The URI arguments
+     *
+     * @return  array<string, mixed>
      */
     public static function getEventsParams(string $args): array
     {
-        $params = [];
-        $params['post_type'] = EventHandler::POST_TYPE;
-
-        // Know period
-        $default_period_list = [
-            'all',
-            'ongoing',
-            'outgoing',
-            'scheduled',
-            'started',
-            'notfinished',
-            'finished',
-        ];
-        // Know order
-        $default_order_list = [
-            'title' => 'LOWER(post_title)',
-            'selected' => 'post_selected',
-            'author' => 'LOWER(user_id)',
-            'date' => 'post_dt',
-            'startdt' => 'event_startdt',
-            'enddt' => 'event_enddt',
-        ];
+        $params = ['post_type' => My::POST_TYPE];
 
         // Test URI
         if (!preg_match(
             '#^' .
             '((/category/([^/]+))|)' .
             '(' .
-             '(/(' . implode('|', $default_period_list) . '))|' . // period
-             '(/(on|in|of)/([0-9]{4})(/([0-9]{1,2})|)(/([0-9]{1,2})|)(/([0-9]{4})(/([0-9]{1,2})|)(/([0-9]{1,2})|)|))|' . // interval
+            '(/(' . implode('|', My::PERIODS) . '))|' . // period
+            '(/(on|in|of)/([0-9]{4})(/([0-9]{1,2})|)(/([0-9]{1,2})|)(/([0-9]{4})(/([0-9]{1,2})|)(/([0-9]{1,2})|)|))|' . // interval
             ')' .
-            '(/(' . implode('|', array_keys($default_order_list)) . ')(/(asc|desc)|)|)' . // order
-            '(/ical.ics|/hcal.html|/gmap|/|)$#i',
+            '(/(' . implode('|', array_keys(self::SORT_FIELDS)) . ')(/(asc|desc)|)|)' . // order
+            '(/|)$#i',
             $args,
             $m
         )) {
-            self::p404();
+            App::url()::p404();
         }
 
         // Get category
         if (!empty($m[3])) {
-            $cat_params['cat_url'] = $m[3];
-            $cat_params['post_type'] = EventHandler::POST_TYPE;
-            App::frontend()->context()->categories = App::blog()->getCategories($cat_params);
+            App::frontend()->context()->categories = App::blog()->getCategories([
+                'cat_url'   => $m[3],
+                'post_type' => My::POST_TYPE,
+            ]);
 
             if (App::frontend()->context()->categories->isEmpty()) {
                 // The specified category does no exist.
-                self::p404();
+                App::url()::p404();
             }
         }
 
-        // Get period
+        $int = fn (int $i): int => isset($m[$i]) && is_numeric($m[$i]) ? (int) $m[$i] : 0;
+
         if (!empty($m[6])) {
+            // Get period
             $params['event_period'] = $m[6];
-        } elseif (!empty($m[8])) { // Get interval
+        } elseif (!empty($m[8])) {
+            // Get interval
             $params['event_interval'] = $m[8];
-            $start = null;
-            $end = null;
+            $start                    = '';
+            $end                      = '';
 
             // Make start date
-            if (!empty($m[13])) {
-                $start = date('Y-m-d 00:00:00', mktime(0, 0, 0, (int) $m[11], (int) $m[13], (int) $m[9]));
-                $end = date('Y-m-d 00:00:00', mktime(0, 0, 0, (int) $m[11], ((int) $m[13] + 1), (int) $m[9]));
-            } elseif (!empty($m[11])) {
-                $start = date('Y-m-d 00:00:00', mktime(0, 0, 0, (int) $m[11], 1, (int) $m[9]));
-                $end = date('Y-m-d 00:00:00', mktime(0, 0, 0, ((int) $m[11] + 1), 1, (int) $m[9]));
-            } elseif (!empty($m[9])) {
-                $start = date('Y-m-d 00:00:00', mktime(0, 0, 0, 1, 1, (int) $m[9]));
-                $end = date('Y-m-d 00:00:00', mktime(0, 0, 0, 1, 1, ((int) $m[9] + 1)));
+            if ($int(13) !== 0) {
+                $start = date('Y-m-d 00:00:00', (int) mktime(0, 0, 0, $int(11), $int(13), $int(9)));
+                $end   = date('Y-m-d 00:00:00', (int) mktime(0, 0, 0, $int(11), $int(13) + 1, $int(9)));
+            } elseif ($int(11) !== 0) {
+                $start = date('Y-m-d 00:00:00', (int) mktime(0, 0, 0, $int(11), 1, $int(9)));
+                $end   = date('Y-m-d 00:00:00', (int) mktime(0, 0, 0, $int(11) + 1, 1, $int(9)));
+            } elseif ($int(9) !== 0) {
+                $start = date('Y-m-d 00:00:00', (int) mktime(0, 0, 0, 1, 1, $int(9)));
+                $end   = date('Y-m-d 00:00:00', (int) mktime(0, 0, 0, 1, 1, $int(9) + 1));
             }
             // Make end date
-            if (!empty($m[19])) {
-                $end = date('Y-m-d 00:00:00', mktime(0, 0, 0, (int) $m[17], (int) $m[19], (int) $m[15]));
-            } elseif (!empty($m[17])) {
-                $end = date('Y-m-d 00:00:00', mktime(0, 0, 0, (int) $m[17], 1, (int) $m[15]));
-            } elseif (!empty($m[15])) {
-                $end = date('Y-m-d 00:00:00', mktime(0, 0, 0, 1, 1, (int) $m[15]));
+            if ($int(19) !== 0) {
+                $end = date('Y-m-d 00:00:00', (int) mktime(0, 0, 0, $int(17), $int(19), $int(15)));
+            } elseif ($int(17) !== 0) {
+                $end = date('Y-m-d 00:00:00', (int) mktime(0, 0, 0, $int(17), 1, $int(15)));
+            } elseif ($int(15) !== 0) {
+                $end = date('Y-m-d 00:00:00', (int) mktime(0, 0, 0, 1, 1, $int(15)));
             }
             // Make interval
-            if ($m[8] == 'on') {
-                $params['event_period'] = 'ongoing';
+            if ($m[8] === 'on') {
+                $params['event_period']  = 'ongoing';
                 $params['event_startdt'] = $end;
-                $params['event_enddt'] = $start;
-            } elseif ($m[8] == 'in') {
-                $params['event_period'] = 'ongoing';
+                $params['event_enddt']   = $start;
+            } elseif ($m[8] === 'in') {
+                $params['event_period']  = 'ongoing';
                 $params['event_startdt'] = $start;
-                $params['event_enddt'] = $end;
+                $params['event_enddt']   = $end;
             } else {
-                if (!empty($m[9])) {
-                    $params['event_start_year'] = $m[9];
+                if ($int(9) !== 0) {
+                    $params['event_start_year'] = $int(9);
                 }
-                if (!empty($m[11])) {
-                    $params['event_start_month'] = $m[11];
+                if ($int(11) !== 0) {
+                    $params['event_start_month'] = $int(11);
                 }
-                if (!empty($m[13])) {
-                    $params['event_start_day'] = $m[13];
+                if ($int(13) !== 0) {
+                    $params['event_start_day'] = $int(13);
                 }
             }
         } else {
-            $params['event_period'] = 'scheduled'; // default
+            // default
+            $params['event_period'] = 'scheduled';
         }
+
         // Get order
-        $params['order'] = 'event_startdt ASC'; // default
-        if (!empty($m[21])) {
-            $sortorder = 'ASC';
-            if (!empty($m[23])) {
-                $sortorder = strtoupper($m[23]);
-            }
-            $params['order'] = $default_order_list[$m[21]] . ' ' . $sortorder;
+        $params['order'] = 'event_startdt ASC';
+        if (!empty($m[21]) && isset(self::SORT_FIELDS[strtolower($m[21])])) {
+            $params['order'] = self::SORT_FIELDS[strtolower($m[21])] . ' ' . (!empty($m[23]) ? strtoupper($m[23]) : 'ASC');
         }
 
         return $params;
     }
 
-    protected static function isIcalDocument(string &$args): bool
+    /**
+     * Check and remove document suffix from URI.
+     *
+     * @param   string  $args       The URI arguments
+     * @param   string  $suffix     The document suffix
+     */
+    protected static function isDocument(string &$args, string $suffix): bool
     {
-        if (preg_match('#/ical\.ics$#', $args, $m)) {
-            $args = preg_replace('#/ical\.ics$#', '', $args);
+        if (str_ends_with($args, $suffix)) {
+            $args = substr($args, 0, -strlen($suffix));
+
             return true;
         }
 
         return false;
     }
 
-    protected static function isHcalDocument(string &$args): bool
-    {
-        if (preg_match('#/hcal\.html$#', $args, $m)) {
-            $args = preg_replace('#/hcal\.html$#', '', $args);
-            return true;
-        }
-
-        return false;
-    }
-
-    protected static function isGmapDocument(string &$args): bool
-    {
-        if (preg_match('#/gmap$#', $args, $m)) {
-            $args = preg_replace('#/gmap$#', '', $args);
-            return true;
-        }
-
-        return false;
-    }
-
+    /**
+     * Serve iCalendar document.
+     *
+     * @param   MetaRecord  $rs             The events
+     * @param   string      $x_dc_folder    The folder
+     */
     public static function serveIcalDocument(MetaRecord $rs, string $x_dc_folder = ''): void
     {
         if ($rs->isEmpty()) {
-            self::p404();
+            App::url()::p404();
         }
 
-        $res =
-        "BEGIN:VCALENDAR\r\n" .
-        "PRODID:-//eventHandler for Dotclear//eventHandler 1.0-alpha7//EN\r\n" .
-        "VERSION:2.0\r\n" .
-        "METHOD:PUBLISH\r\n" .
-        "CALSCALE:GREGORIAN\r\n" .
-        implode("\r\n ", str_split(trim("X-DC-BLOGNAME:" . App::blog()->name()), 70)) . "\r\n";
+        $res = "BEGIN:VCALENDAR\r\n" .
+            'PRODID:-//eventHandler for Dotclear//eventHandler ' . (is_string($version = App::plugins()->moduleInfo(My::id(), 'version')) ? $version : '') . "//EN\r\n" .
+            "VERSION:2.0\r\n" .
+            "METHOD:PUBLISH\r\n" .
+            "CALSCALE:GREGORIAN\r\n" .
+            implode("\r\n ", mb_str_split(trim('X-DC-BLOGNAME:' . App::blog()->name()), 70)) . "\r\n";
 
-        if ($x_dc_folder) {
-            $res .= implode("\r\n ", str_split(trim("X-DC-FOLDER:" . $x_dc_folder), 70)) . "\r\n";
+        if ($x_dc_folder !== '') {
+            $res .= implode("\r\n ", mb_str_split(trim('X-DC-FOLDER:' . $x_dc_folder), 70)) . "\r\n";
         }
 
         while ($rs->fetch()) {
-            // @see RsExtension.php
-            $res .= $rs->getIcalVEVENT();
+            $res .= RsExtension::getIcalVEVENT($rs);
         }
 
         $res .= "END:VCALENDAR\r\n";
@@ -416,52 +423,46 @@ class UrlHandler extends Url
         header('Content-Length: ' . strlen($res));
         header('Content-Disposition: attachment; filename="events.ics"');
         echo $res;
-        exit;
+        dotclear_exit();
     }
 
-    // Serve special hcal document
+    /**
+     * Serve hCalendar document.
+     *
+     * @param   MetaRecord  $rs             The events
+     * @param   string      $x_dc_folder    The folder
+     */
     public static function serveHcalDocument(MetaRecord $rs, string $x_dc_folder = ''): void
     {
         if ($rs->isEmpty()) {
-            self::p404();
+            App::url()::p404();
         }
 
-        $res =
-        '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"' . "\n" .
-        '"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">' . "\n" .
-        '<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="' .
-        App::blog()->settings()->system->lang . '" lang="' . App::blog()->settings()->system->lang . '">' . "\n" .
-        '<head>' . "\n" .
-        '<title>' . Html::escapeHTML(App::blog()->name()) . ' - ' . __('Events') . '</title>' . "\n" .
-        '<style type="text/css" media="screen">' . "\n" .
-        '@import url(' . App::blog()->getQmarkURL() .
-        'pf=eventHandler/css/event-hcalendar.css);' . "\n" .
-        '</style>' . "\n" .
-        '</head>' . "\n" .
-        '<body>' . "\n" .
-        '<div id="page">' . "\n" .
-        '<div id="top">' . "\n" .
-        '<h1><a href="' . App::blog()->url() . '">' . Html::escapeHTML(App::blog()->name()) .
-        ' - ' . __('Events') . '</a></h1>' . "\n";
+        $lang = Html::escapeHTML((string) App::blog()->settings()->get('system')->getStr('lang', false));
+        $res  = '<!DOCTYPE html>' . "\n" .
+            '<html lang="' . $lang . '">' . "\n" .
+            '<head>' . "\n" .
+            '<meta charset="UTF-8">' . "\n" .
+            '<title>' . Html::escapeHTML(App::blog()->name()) . ' - ' . __('Events') . '</title>' . "\n" .
+            '<link rel="stylesheet" href="' . App::blog()->getQmarkURL() . 'pf=' . My::id() . '/css/event-hcalendar.css">' . "\n" .
+            '</head>' . "\n" .
+            '<body>' . "\n" .
+            '<div id="page">' . "\n" .
+            '<div id="top">' . "\n" .
+            '<h1><a href="' . App::blog()->url() . '">' . Html::escapeHTML(App::blog()->name()) . ' - ' . __('Events') . '</a></h1>' . "\n";
 
-        if ($x_dc_folder) {
-            $res .= '<p>' . __('Directory:') . ' <a href="' .
-            App::blog()->url() . App::url()->getBase('eventhandler_list') . $x_dc_folder . '">' .
-            $x_dc_folder . '</a></p>' . "\n";
+        if ($x_dc_folder !== '') {
+            $res .= '<p>' . __('Directory:') . ' <a href="' . App::blog()->url() . App::url()->getBase('eventhandler_list') . Html::escapeHTML($x_dc_folder) . '">' .
+                Html::escapeHTML($x_dc_folder) . '</a></p>' . "\n";
         }
 
-        $res .=
-        '</div>';
+        $res .= '</div>' . "\n" . '<div id="items">' . "\n";
 
         while ($rs->fetch()) {
-            // See lib.eventhandler.rs.extension.php
-            $res .=
-            '<div id="items">' . "\n" .
-            $rs->getHcalVEVENT() .
-            '</div>' . "\n";
+            $res .= RsExtension::getHcalVEVENT($rs) . "\n";
         }
 
-        $res .=
+        $res .= '</div>' . "\n" .
             '<div id="footer">' . "\n" .
             '<p>' . __('This page is powered by Dotclear and eventHandler') . '</p>' . "\n" .
             '</div>' . "\n" .
@@ -471,64 +472,63 @@ class UrlHandler extends Url
         header('Content-Type: text/html; charset=UTF-8');
         header('Content-Length: ' . strlen($res));
         echo $res;
-        exit;
+        dotclear_exit();
     }
 
-    // Serve special gmap document
-    public static function serveGmapDocument(MetaRecord $rs, string $x_dc_folder = ''): void
+    /**
+     * Serve map document.
+     *
+     * @param   MetaRecord  $rs     The events
+     */
+    public static function serveGmapDocument(MetaRecord $rs): void
     {
-        $res =
-        '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"' . "\n" .
-        '"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">' . "\n" .
-        '<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="' .
-        App::blog()->settings()->system->lang . '" lang="' . App::blog()->settings()->system->lang . '">' . "\n" .
-        '<head>' . "\n" .
-        '<title>' . Html::escapeHTML(App::blog()->name()) . ' - ' . __('Events') . '</title>' . "\n" .
-        '<meta name="viewport" content="initial-scale=1.0, user-scalable=no" />' . "\n" .
-        '<script src="' . App::blog()->settings()->system->themes_url .
-        "/" . App::blog()->settings()->system->theme . '/../default/js/jquery.js"></script=>' . "\n" .
-        '<script type="text/javascript" src="' . App::blog()->settings()->system->themes_url .
-        "/" . App::blog()->settings()->system->theme . '/../default/js/jquery.cookie.js"></script>' . "\n" .
-        "<script src=\"" . App::blog()->getQmarkURL() .
-        'pf=eventHandler/js/googlepmaps/event-public-map.js"></script>' . "\n" .
-        '<style type="text/css">' .
-        'html { height: 100%; } body { height: 100%; margin: 0px; padding: 0px; } ' .
-        '.event-gmap, .event-gmap-place { height: 100%; } h2 { margin: 2em;}</style>' . "\n" .
-        '</head>' .
-        '<body>';
+        $lang     = Html::escapeHTML((string) App::blog()->settings()->get('system')->getStr('lang', false));
+        $res  = '<!DOCTYPE html>' . "\n" .
+            '<html lang="' . $lang . '">' . "\n" .
+            '<head>' . "\n" .
+            '<meta charset="UTF-8">' . "\n" .
+            '<title>' . Html::escapeHTML(App::blog()->name()) . ' - ' . __('Events') . '</title>' . "\n" .
+            '<meta name="viewport" content="initial-scale=1.0, user-scalable=no">' . "\n" .
+            FrontendBehaviors::mapHeaders(true) .
+            '<style>html { height: 100%; } body { height: 100%; margin: 0px; padding: 0px; } ' .
+            '.event-map, .event-map-place { height: 100%; } h2 { margin: 2em;}</style>' . "\n" .
+            '</head>' . "\n" .
+            '<body>' . "\n";
 
-        if ($rs->count()) {
-            $total_lat = $total_lng = 0;
-            $markers = '';
-            while ($rs->fetch()) {
-                $total_lat += (float) $rs->event_latitude;
-                $total_lng += (float) $rs->event_longitude;
-                $markers .= $rs->getMapVEvent();
+        $markers = '';
+        $lat     = 0.0;
+        $lng     = 0.0;
+        $count   = 0;
+        while ($rs->fetch()) {
+            if ($rs->strField('event_latitude') === '' || $rs->strField('event_longitude') === '') {
+                continue;
             }
-            $lat = round($total_lat / $rs->count(), 7);
-            $lng = round($total_lng / $rs->count(), 7);
+            $lat += (float) $rs->strField('event_latitude');
+            $lng += (float) $rs->strField('event_longitude');
+            $count++;
+            $markers .= RsExtension::getMapVEvent($rs);
+        }
 
+        if ($count > 0) {
             $res .= EventHandler::getMapContent(
                 '',
                 '',
-                My::settings()->public_map_type,
-                2,
+                (string) My::settings()->getStr('public_map_type', false),
+                $count === 1 && $rs->count() === 1 ? max(3, (int) My::settings()->getInt('public_map_zoom', false)) : 2,
                 1,
-                $lat,
-                $lng,
+                round($lat / $count, 7),
+                round($lng / $count, 7),
                 $markers
             );
         } else {
             $res .= '<h2>' . __("There's no event at this time.") . '</h2>';
         }
 
-        $res .=
-        '</body>' .
-        '</html>';
+        $res .= "\n" . '</body>' . "\n" . '</html>';
 
         header('Content-Type: text/html; charset=UTF-8');
         header('Content-Length: ' . strlen($res));
         echo $res;
-        exit;
+        dotclear_exit();
     }
 }

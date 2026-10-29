@@ -1,64 +1,55 @@
 <?php
-/*
- *  -- BEGIN LICENSE BLOCK ----------------------------------
- *
- *  This file is part of eventHandler, a plugin for Dotclear 2.
- *
- *  Copyright(c) 2014-2023 Nicolas Roudaire <nikrou77@gmail.com> https://www.nikrou.net
- *
- *  Copyright (c) 2009-2013 Jean-Christian Denis and contributors
- *  contact@jcdenis.fr https://chez.jcdenis.fr/
- *
- *  Licensed under the GPL version 2.0 license.
- *  A copy of this license is available in LICENSE file or at
- *  http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- *
- *  -- END LICENSE BLOCK ------------------------------------
- */
 
 declare(strict_types=1);
 
 namespace Dotclear\Plugin\eventHandler;
 
+use ArrayObject;
 use Dotclear\App;
-use Dotclear\Core\Backend\Combos;
-use Dotclear\Core\Backend\Filter\Filter;
 use Dotclear\Core\Backend\Filter\Filters;
 use Dotclear\Core\Backend\Filter\FiltersLibrary;
 use Dotclear\Helper\Html\Html;
-use ArrayObject;
+use Dotclear\Helper\Stack\Filter;
 use Exception;
 
+/**
+ * @brief       eventHandler events list filters.
+ * @ingroup     eventHandler
+ *
+ * @author      Jean-Christian Denis
+ * @author      Nicolas Roudaire
+ * @copyright   GPL-2.0 https://www.gnu.org/licenses/gpl-2.0.html
+ */
 class FilterEvents extends Filters
 {
-    public function __construct(private readonly string $post_type = EventHandler::POST_TYPE)
+    public function __construct()
     {
-        parent::__construct('posts');
+        parent::__construct(My::id());
 
-        $this->add((new Filter('post_type', $post_type))->param('post_type'));
-
-        $filters = new ArrayObject([
+        $filters = new ArrayObject(array_filter([
             FiltersLibrary::getPageFilter(),
             $this->getPostUserFilter(),
             $this->getPostCategoriesFilter(),
+            App::status()->post()->filter(),
             $this->getPeriodFilter(),
-            $this->getPostStatusFilter(),
+            $this->getPostSelectedFilter(),
             $this->getPostMonthFilter(),
             $this->getPostLangFilter(),
-            $this->getSortByFilter(),
-        ]);
+        ]));
 
-        $filters = $filters->getArrayCopy();
+        # --BEHAVIOR-- adminEventHandlerFilter -- ArrayObject
+        App::behavior()->callBehavior('adminEventHandlerFilter', $filters);
 
-        $this->add($filters);
+        $this->add($filters->getArrayCopy());
     }
 
+    /**
+     * Events users select.
+     */
     public function getPostUserFilter(): ?Filter
     {
-        $users = null;
-
         try {
-            $users = App::blog()->getPostsUsers($this->post_type);
+            $users = App::blog()->getPostsUsers(My::POST_TYPE);
             if ($users->isEmpty()) {
                 return null;
             }
@@ -68,25 +59,23 @@ class FilterEvents extends Filters
             return null;
         }
 
-        $combo = Combos::getUsersCombo($users);
+        $combo = App::backend()->combos()->getUsersCombo($users);
         App::lexical()->lexicalKeySort($combo, App::lexical()::ADMIN_LOCALE);
 
         return (new Filter('user_id'))
             ->param()
             ->title(__('Author:'))
-            ->options(array_merge(
-                ['-' => ''],
-                $combo
-            ))
+            ->options(array_merge(['-' => ''], $combo))
             ->prime(true);
     }
 
+    /**
+     * Events categories select.
+     */
     public function getPostCategoriesFilter(): ?Filter
     {
-        $categories = null;
-
         try {
-            $categories = App::blog()->getCategories(['post_type' => $this->post_type]);
+            $categories = App::blog()->getCategories(['post_type' => My::POST_TYPE]);
             if ($categories->isEmpty()) {
                 return null;
             }
@@ -97,14 +86,14 @@ class FilterEvents extends Filters
         }
 
         $combo = [
-            '-' => '',
+            '-'            => '',
             __('(No cat)') => 'NULL',
         ];
         while ($categories->fetch()) {
             $combo[
-                str_repeat('&nbsp;', ($categories->level - 1) * 4) .
-                Html::escapeHTML($categories->cat_title) . ' (' . $categories->nb_post . ')'
-            ] = $categories->cat_id;
+                str_repeat('&nbsp;', ($categories->intField('level') - 1) * 4) .
+                Html::escapeHTML($categories->strField('cat_title')) . ' (' . $categories->intField('nb_post') . ')'
+            ] = (string) $categories->intField('cat_id');
         }
 
         return (new Filter('cat_id'))
@@ -114,26 +103,42 @@ class FilterEvents extends Filters
             ->prime(true);
     }
 
-    public function getPostStatusFilter(): Filter
+    /**
+     * Events period select.
+     */
+    public function getPeriodFilter(): Filter
     {
-        return (new Filter('status'))
-            ->param('post_status')
-            ->title(__('Status:'))
-            ->options(array_merge(
-                ['-' => ''],
-                Combos::getPostStatusesCombo()
-            ))
+        return (new Filter('period'))
+            ->param('event_period')
+            ->title(__('Period:'))
+            ->options(array_merge(['-' => ''], My::periodsCombo(false)))
             ->prime(true);
     }
 
+    /**
+     * Events selected select.
+     */
+    public function getPostSelectedFilter(): Filter
+    {
+        return (new Filter('selected'))
+            ->param('post_selected')
+            ->title(__('Selected:'))
+            ->options([
+                '-'                 => '',
+                __('Selected')      => '1',
+                __('Not selected')  => '0',
+            ]);
+    }
+
+    /**
+     * Events month select.
+     */
     public function getPostMonthFilter(): ?Filter
     {
-        $dates = null;
-
         try {
             $dates = App::blog()->getDates([
-                'type' => 'month',
-                'post_type' => $this->post_type,
+                'type'      => 'month',
+                'post_type' => My::POST_TYPE,
             ]);
             if ($dates->isEmpty()) {
                 return null;
@@ -145,21 +150,22 @@ class FilterEvents extends Filters
         }
 
         return (new Filter('month'))
-            ->param('post_month', fn($f) => substr((string) $f[0], 4, 2))
-            ->param('post_year', fn($f) => substr((string) $f[0], 0, 4))
+            ->param('post_month', fn ($f): string => is_array($f) && is_scalar($f[0]) ? substr((string) $f[0], 4, 2) : '')
+            ->param('post_year', fn ($f): string => is_array($f) && is_scalar($f[0]) ? substr((string) $f[0], 0, 4) : '')
             ->title(__('Month:'))
             ->options(array_merge(
                 ['-' => ''],
-                Combos::getDatesCombo($dates)
+                App::backend()->combos()->getDatesCombo($dates)
             ));
     }
 
+    /**
+     * Events lang select.
+     */
     public function getPostLangFilter(): ?Filter
     {
-        $langs = null;
-
         try {
-            $langs = App::blog()->getLangs(['post_type' => $this->post_type]);
+            $langs = App::blog()->getLangs(['post_type' => My::POST_TYPE]);
             if ($langs->isEmpty()) {
                 return null;
             }
@@ -169,58 +175,16 @@ class FilterEvents extends Filters
             return null;
         }
 
+        $combo = ['-' => ''];
+        foreach (App::backend()->combos()->getLangsCombo($langs, false) as $name => $code) {
+            if (is_string($code)) {
+                $combo[$name] = $code;
+            }
+        }
+
         return (new Filter('lang'))
             ->param('post_lang')
             ->title(__('Lang:'))
-            ->options(array_merge(
-                ['-' => ''],
-                Combos::getLangsCombo($langs, false)
-            ));
-    }
-
-    public function getPeriodFilter(): ?Filter
-    {
-        return (new Filter('period'))
-        ->param('event_period')
-        ->title(__('Period:'))
-        ->options([
-            '-' => '',
-            __('Not started') => 'scheduled',
-            __('Started') => 'started',
-            __('Finished') => 'finished',
-            __('Not finished') => 'notfinished',
-            __('Ongoing') => 'ongoing',
-            __('Outgoing') => 'outgoing',
-        ]);
-    }
-
-    public function getSelectedFilter(): ?Filter
-    {
-        return (new Filter('selected'))
-        ->param('post_period')
-        ->title(__('Selected:'))
-        ->options([
-            '-' => '',
-            __('selected') => '1',
-            __('not selected') => '0',
-        ]);
-    }
-
-    public function getSortByFilter(): ?Filter
-    {
-        return (new Filter('sortby'))
-        ->param('order')
-        ->title(__('Sort by:'))
-        ->options([
-            __('Date') => 'post_dt',
-            __('Title') => 'post_title',
-            __('Category') => 'cat_title',
-            __('Author') => 'user_id',
-            __('Status') => 'post_status',
-            __('Selected') => 'post_selected',
-            __('Start date') => 'event_startdt',
-            __('End date') => 'event_enddt',
-            __('Localization') => 'event_address',
-        ]);
+            ->options($combo);
     }
 }
