@@ -157,7 +157,7 @@ class UrlHandler
         $args = (string) $args;
         $n    = App::url()::getPageNumber($args);
         $args = is_string($args) ? $args : '';
-        App::frontend()->setPageNumber(is_int($n) && $n > 0 ? $n : 1);
+        App::frontend()->setPageNumber(is_int($n) ? max(1, $n) : 1);
 
         $is_ical = self::isDocument($args, '/ical.ics');
         $is_hcal = self::isDocument($args, '/hcal.html');

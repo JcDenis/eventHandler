@@ -50,5 +50,6 @@ or from entries list actions.
 
 * Jean-Christian Denis (author)
 * Nicolas Roudaire
+* Claude (AI assistant by Anthropic)
 
 You are welcome to contribute to this code.
