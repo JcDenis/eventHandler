@@ -1,3 +1,8 @@
+eventHandler 2026.11.14
+===========================================================
+* Add a user guide in French, with screenshots
+* Add admin help for events list, event edition and configuration
+
 eventHandler 2026.11.09
 ===========================================================
 * Fix compatibility with Dotclear 2.40
