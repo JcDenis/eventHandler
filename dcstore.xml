@@ -7,7 +7,7 @@
     <desc>Manage events on your blog</desc>
     <file>https://github.com/JcDenis/eventHandler/releases/download/v2026.11.14/plugin-eventHandler.zip</file>
     <da:dcmin>2.39</da:dcmin>
-    <da:details>https://github.com/JcDenis/eventHandler/src/branch/master/README.md</da:details>
+    <da:details>https://github.com/JcDenis/eventHandler/blob/master/README.md</da:details>
     <da:support>https://github.com/JcDenis/eventHandler/issues</da:support>
   </module>
 </modules>
