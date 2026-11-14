@@ -17,6 +17,8 @@ end date and localization. Entries can be related to events.
 Plugin comes with public pages (list, calendar, map, feeds, iCalendar)
 and widgets.
 
+A [user guide in French](https://github.com/JcDenis/eventHandler/blob/master/docs/fr/utilisation.md) is available.
+
 ## REQUIREMENTS
 
 * Dotclear 2.39
@@ -40,6 +42,7 @@ or from entries list actions.
 
 ## LINKS
 
+* [User guide (in French)](https://github.com/JcDenis/eventHandler/blob/master/docs/fr/utilisation.md)
 * [License](https://github.com/JcDenis/eventHandler/blob/master/LICENSE)
 * [Packages & details](https://github.com/JcDenis/eventHandler/releases) (or on [Repository](https://dotclear.org/plugin/detail/eventHandler))
 * [Sources & contributions](https://github.com/JcDenis/eventHandler)
