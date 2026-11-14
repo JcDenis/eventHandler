@@ -261,7 +261,7 @@ class Manage
             );
         }
 
-        Page::helpBlock(My::id());
+        Page::helpBlock(My::id() . '-events');
         Page::closeModule();
     }
 }

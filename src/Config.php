@@ -7,6 +7,7 @@ namespace Dotclear\Plugin\eventHandler;
 use Dotclear\App;
 use Dotclear\Core\Backend\ModulesList;
 use Dotclear\Core\Backend\Notices;
+use Dotclear\Core\Backend\Page;
 use Dotclear\Helper\Html\Form\Checkbox;
 use Dotclear\Helper\Html\Form\Fieldset;
 use Dotclear\Helper\Html\Form\Input;
@@ -184,6 +185,8 @@ class Config
                 ->text(__('Enable plugin to configure it.'))
                 ->render();
 
+            Page::helpBlock(My::id() . '-config');
+
             return;
         }
 
@@ -348,5 +351,7 @@ class Config
          */
         # --BEHAVIOR-- adminEventHandlerSettings --
         App::behavior()->callBehavior('adminEventHandlerSettings');
+
+        Page::helpBlock(My::id() . '-config');
     }
 }

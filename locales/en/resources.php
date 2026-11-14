@@ -18,4 +18,6 @@
 
 use Dotclear\App;
 
-App::backend()->resources()->set('help', 'eventHandler', __DIR__ . '/help/help.html');
+App::backend()->resources()->set('help', 'eventHandler-events', __DIR__ . '/help/events.html');
+App::backend()->resources()->set('help', 'eventHandler-event', __DIR__ . '/help/event.html');
+App::backend()->resources()->set('help', 'eventHandler-config', __DIR__ . '/help/config.html');
