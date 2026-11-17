@@ -967,3 +967,6 @@ msgstr "Du %sd, %st au %ed, %et"
 
 msgid "go to this category"
 msgstr "aller à cette catégorie"
+
+msgid "Event"
+msgstr "Événement"

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Dotclear\Plugin\eventHandler;
 
+use ArrayObject;
 use Dotclear\App;
 use Dotclear\Helper\Process\TraitProcess;
 
@@ -128,6 +129,10 @@ class Frontend
             'publicBeforeDocumentV2'   => FrontendBehaviors::publicBeforeDocumentV2(...),
             'publicEntryBeforeContent' => FrontendBehaviors::publicEntryBeforeContent(...),
             'publicEntryAfterContent'  => FrontendBehaviors::publicEntryAfterContent(...),
+            // add events to the types filter of plugin saba (optional)
+            'sabaAddPostTypes' => function (ArrayObject $types): void {
+                $types[My::POST_TYPE] = __('Event');
+            },
             'publicBreadcrumb'         => function (string $context, string $separator): string {
                 return match ($context) {
                     'eventhandler_list' => __('Events'),
