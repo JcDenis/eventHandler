@@ -1,3 +1,7 @@
+eventHandler 2026.11.18
+===========================================================
+* [new] Add events to the types filter of the search of plugin saba
+
 eventHandler 2026.11.14
 ===========================================================
 * Add a user guide in French, with screenshots
