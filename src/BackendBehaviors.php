@@ -9,6 +9,7 @@ use Dotclear\App;
 use Dotclear\Core\Backend\Action\ActionsPosts;
 use Dotclear\Core\Backend\Favorites;
 use Dotclear\Core\Backend\Page;
+use Dotclear\Core\Backend\UserPrefFilter;
 use Dotclear\Database\Cursor;
 use Dotclear\Database\MetaRecord;
 use Dotclear\Helper\Html\Form\Checkbox;
@@ -80,17 +81,19 @@ class BackendBehaviors
     /**
      * Events lists sort options.
      *
-     * @param   ArrayObject<string, mixed>  $sorts  The sort options
+     * @param   ArrayObject<array-key, UserPrefFilter>  $filters  The list filters
      */
-    public static function adminFiltersListsV2(ArrayObject $sorts): void
+    public static function adminFiltersListsV3(ArrayObject $filters): void
     {
-        $sorts[My::id()] = [
+        $filters->append(new UserPrefFilter(
+            My::id(),
             My::name(),
             My::sortbyCombo(),
             'event_startdt',
             'desc',
-            [__('events per page'), 30],
-        ];
+            __('events per page'),
+            30
+        ));
     }
 
     /**
