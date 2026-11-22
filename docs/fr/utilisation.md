@@ -11,6 +11,7 @@ _eventHandler_ ajoute à Dotclear un nouveau type de contenu : les **événement
 5. [Lier des billets et des événements](#lier-des-billets-et-des-événements)
 6. [Pages publiques](#pages-publiques)
 7. [Widgets](#widgets)
+8. [Avec un assistant IA](#avec-un-assistant-ia)
 
 ## Activer le plugin
 
@@ -84,3 +85,17 @@ Dans **Apparence du blog › Widgets**, trois widgets sont disponibles : prochai
 ![Widgets dans l'administration](img/widgets-admin.png)
 
 ![Widgets sur le blog](img/widgets-public.png)
+
+## Avec un assistant IA
+
+Avec le plugin [ClaudetteMcp](https://github.com/JcDenis/ClaudetteMcp), un assistant IA connecté au blog peut gérer les événements,
+si le plugin est activé sur le blog :
+
+* `list_events` : lister les événements avec leurs dates et leur lieu (à venir, en cours, passés…) ;
+* `set_event` : changer les dates de début et de fin, le lieu et ses coordonnées d'un événement ;
+* les outils des billets (`create_post`, `update_post`, `set_post_status`…) connaissent le type « eventhandler » :
+  l'assistant crée un événement, le modifie ou le publie comme un billet.
+
+Un événement créé par l'assistant n'est pas publié, et il commence et finit à la date du billet tant que `set_event` n'a pas fixé ses dates.
+Les commentaires et les rétroliens y sont fermés, comme pour un événement créé dans l'administration.
+_ClaudetteMcp_ n'est pas nécessaire au fonctionnement d'_eventHandler_.

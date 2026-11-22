@@ -23,6 +23,8 @@ Required Dotclear and PHP versions: see `_define.php`.
 * `src/BackendBehaviors.php`: admin behaviors.
 * `src/Calendar.php`: calendar.
 * `src/Config.php`: configuration page of the module (plugins manager).
+* `src/ClaudetteMcp/`: tools for the plugin ClaudetteMcp (`list_events`, `set_event`), registered in `src/Frontend.php`
+  with the behaviors `ClaudetteMcpAddTool` and `ClaudetteMcpAddPostType` (the type is opened to the entries tools of ClaudetteMcp).
 * `src/EventHandler.php`: events are entries of type "eventhandler" with extra fields.
 * `src/FilterEvents.php`: events list filters.
 * `src/Frontend.php`: public side: behaviors, template tags and URL handlers registration.
@@ -48,6 +50,9 @@ Required Dotclear and PHP versions: see `_define.php`.
 
 ## Pitfalls
 
+* An event entry without row in the table `eventhandler` is not seen (inner join): with ClaudetteMcp, `create_post` gets
+  a default row (start and end at the entry date) from `coreAfterPostCreate`, registered only when ClaudetteMcp builds its tools.
+* Classes of `src/ClaudetteMcp/` extend ClaudetteMcp classes: only use them from ClaudetteMcp behaviors (never required).
 * Table structure changes need a migration in `src/Install.php` (version compare), and must work on MySQL, PostgreSQL and SQLite.
 
 ## Testing

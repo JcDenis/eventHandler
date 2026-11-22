@@ -40,6 +40,11 @@ Once it's done you can manage your events from menu
 Events can be bound to entries from entry edition page 
 or from entries list actions.
 
+With the plugin [ClaudetteMcp](https://github.com/JcDenis/ClaudetteMcp), an AI assistant connected to the blog
+can work on events: its entries tools (`create_post`, `update_post`, `set_post_status`...) know the type `eventhandler`,
+the tool `list_events` lists events with their dates and place, and the tool `set_event` sets them.
+The plugin must be active on the blog. ClaudetteMcp is not required by _eventHandler_.
+
 ## LINKS
 
 * [User guide (in French)](https://github.com/JcDenis/eventHandler/blob/master/docs/fr/utilisation.md)
