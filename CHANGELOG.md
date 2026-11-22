@@ -1,3 +1,8 @@
+eventHandler 2026.11.23
+===========================================================
+* [new] Events for an AI assistant connected with ClaudetteMcp (list_events, set_event, entries tools)
+* [new] Family of the ClaudetteMcp tools, for the keys limited to some families
+
 eventHandler 2026.11.22
 ===========================================================
 * [compat] Use adminFiltersListsV3 behavior
