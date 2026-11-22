@@ -52,7 +52,7 @@ Required Dotclear and PHP versions: see `_define.php`.
 
 * An event entry without row in the table `eventhandler` is not seen (inner join): with ClaudetteMcp, `create_post` gets
   a default row (start and end at the entry date) from `coreAfterPostCreate`, registered only when ClaudetteMcp builds its tools.
-* Classes of `src/ClaudetteMcp/` extend ClaudetteMcp classes: only use them from ClaudetteMcp behaviors (never required).
+* Classes of `src/ClaudetteMcp/` extend ClaudetteMcp classes: only use them from ClaudetteMcp behaviors (optional dependency `ClaudetteMcp?` in `requires`).
 * Table structure changes need a migration in `src/Install.php` (version compare), and must work on MySQL, PostgreSQL and SQLite.
 
 ## Testing
