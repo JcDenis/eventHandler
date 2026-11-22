@@ -26,6 +26,14 @@ use Dotclear\Plugin\eventHandler\My;
 abstract class EventTool extends PostTool
 {
     /**
+     * Family of tools for the keys of ClaudetteMcp (string, not constant: older ClaudetteMcp versions have none).
+     */
+    public function family(): string
+    {
+        return 'posts';
+    }
+
+    /**
      * Only when ClaudetteMcp builds its tools: an event created with create_post gets its event row.
      */
     public static function register(): void
