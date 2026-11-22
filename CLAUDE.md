@@ -44,7 +44,7 @@ Required Dotclear and PHP versions: see `_define.php`.
 * Database table `eventhandler`.
 * URL handlers: `eventhandler_single`, `eventhandler_preview`, `eventhandler_list`, `eventhandler_feed`, `eventhandler_pubrest`.
 * Widgets: `ehEvents`, `ehEventsOfPost`, `ehPostsOfEvent`, `ehCategories`, `ehMap`, `ehCalendar`.
-* Behaviors used: `initWidgets`, `templateCustomSortByAlias`, `adminDashboardFavoritesV2`, `adminColumnsListsV2`, `adminFiltersListsV2`, `adminBeforePostDelete`, `adminPageHTTPHeaderCSP`, `adminPostHeaders`, `adminPostsActions`, `adminPostFormItems`, `adminAfterPostCreate`, `adminAfterPostUpdate`, `publicHeadContent`, `publicBeforeDocumentV2`, `publicEntryBeforeContent`, `publicEntryAfterContent`, `sabaAddPostTypes` (optional plugin saba), `publicBreadcrumb`.
+* Behaviors used: `initWidgets`, `templateCustomSortByAlias`, `adminDashboardFavoritesV2`, `adminColumnsListsV2`, `adminFiltersListsV3`, `adminBeforePostDelete`, `adminPageHTTPHeaderCSP`, `adminPostHeaders`, `adminPostsActions`, `adminPostFormItems`, `adminAfterPostCreate`, `adminAfterPostUpdate`, `publicHeadContent`, `publicBeforeDocumentV2`, `publicEntryBeforeContent`, `publicEntryAfterContent`, `sabaAddPostTypes` (optional plugin saba), `publicBreadcrumb`.
 
 ## Pitfalls
 
