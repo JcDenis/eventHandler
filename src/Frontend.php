@@ -104,6 +104,25 @@ class Frontend
             return false;
         }
 
+        // Events for AI assistants connected to the blog with the plugin ClaudetteMcp (never required).
+        // Like in backend: the plugin must be active on the blog, the user must be able to write entries.
+        App::behavior()->addBehaviors([
+            'ClaudetteMcpAddPostType' => function (ArrayObject $types): void {
+                if (My::isActive() && App::auth()->check(App::auth()->makePermissions([
+                    App::auth()::PERMISSION_USAGE,
+                    App::auth()::PERMISSION_CONTENT_ADMIN,
+                ]), App::blog()->id())) {
+                    $types->append(My::POST_TYPE);
+                }
+            },
+            // Classes of src/ClaudetteMcp/ need ClaudetteMcp: only used from its behaviors
+            'ClaudetteMcpAddTool' => function (ArrayObject $tools): void {
+                $tools->append(new ClaudetteMcp\ListEvents());
+                $tools->append(new ClaudetteMcp\SetEvent());
+                ClaudetteMcp\EventTool::register();
+            },
+        ]);
+
         // Localisation
         __('scheduled');
         __('ongoing');
