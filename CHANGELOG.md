@@ -2,6 +2,7 @@ eventHandler 2026.11.23
 ===========================================================
 * [new] Events for an AI assistant connected with ClaudetteMcp (list_events, set_event, entries tools)
 * [new] Family of the ClaudetteMcp tools, for the keys limited to some families
+* [fix] Zoom levels of the map are labelled "Zoom level n", numeric labels broke the widget settings check
 
 eventHandler 2026.11.22
 ===========================================================
