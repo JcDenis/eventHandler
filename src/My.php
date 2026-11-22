@@ -170,13 +170,15 @@ class My extends MyPlugin
     /**
      * Map zoom combo.
      *
-     * @return  array<int|string, string>
+     * Labels are not numeric: PHP would turn them into integer keys.
+     *
+     * @return  array<string, string>
      */
     public static function mapZoomCombo(): array
     {
         $combo = [];
         for ($i = 3; $i < 21; $i++) {
-            $combo[(string) $i] = (string) $i;
+            $combo[sprintf(__('Zoom level %d'), $i)] = (string) $i;
         }
 
         return $combo;

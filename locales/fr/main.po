@@ -970,3 +970,6 @@ msgstr "aller à cette catégorie"
 
 msgid "Event"
 msgstr "Événement"
+
+msgid "Zoom level %d"
+msgstr "Niveau de zoom %d"
