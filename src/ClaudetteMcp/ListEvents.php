@@ -40,8 +40,7 @@ class ListEvents extends EventTool
     public function description(): string
     {
         return 'List events of the blog (plugin eventHandler) with their start and end dates and their place, by start date. ' .
-            'Events are entries of type "' . My::POST_TYPE . '": read, create, update or publish them with the entries tools ' .
-            '(get_post, create_post, update_post, set_post_status), and set their dates and place with set_event. ' .
+            'Events are entries of type "' . My::POST_TYPE . '": the entries tools given to the connector work on them (read one with get_post). ' .
             'Only published events are listed by default.';
     }
 
