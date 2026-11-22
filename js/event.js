@@ -14,8 +14,10 @@
  * -- END LICENSE BLOCK ------------------------------------*/
 
 $(function () {
-  $('#event-area-title').toggleWithLegend($('#event-area-content'), {
-    legend_click: true,
-    cookie: 'dcx_eventhandler_admin_options',
-  });
+  const title = document.getElementById('event-area-title');
+  if (title) {
+    dotclear.toggleWithLegend(title, document.querySelectorAll('#event-area-content'), {
+      legend_click: true,
+    });
+  }
 });

@@ -14,13 +14,12 @@
  * -- END LICENSE BLOCK ------------------------------------*/
 
 $(function () {
-  $('#eventhandler-form-title').toggleWithLegend(
-    $('#eventhandler-form-content'),
-    {
+  const title = document.getElementById('eventhandler-form-title');
+  if (title) {
+    dotclear.toggleWithLegend(title, document.querySelectorAll('#eventhandler-form-content'), {
       legend_click: true,
-      cookie: 'dcx_eventhandler_admin_form_sidebar',
-    }
-  );
+    });
+  }
 
   $('.event-node').each(function () {
     var nodeValue = $(this)
