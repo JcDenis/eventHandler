@@ -1,3 +1,8 @@
+eventHandler 2026.11.22
+===========================================================
+* [compat] Use adminFiltersListsV3 behavior
+* [compat] Use dotclear.toggleWithLegend() instead of deprecated jQuery plugin
+
 eventHandler 2026.11.18
 ===========================================================
 * [new] Add events to the types filter of the search of plugin saba
